@@ -41,6 +41,28 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 
 function ResultsPage() {
   const { id } = Route.useParams();
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const getPdfUrl = useServerFn(getConsultationPdfUrl);
+  const generatePdf = useServerFn(generateConsultationPdfUrl);
+
+  const handleDownload = async () => {
+    if (!id) return;
+    setIsGeneratingPdf(true);
+    try {
+      let url = consultation.data?.pdf_url;
+      if (!url) {
+        const result = await generatePdf({ data: { consultationId: id } });
+        url = result.pdfUrl;
+      } else {
+        const result = await getPdfUrl({ data: { consultationId: id } });
+        url = result.pdfUrl;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
 
   const consultation = useQuery({
     queryKey: ["consultation", id],
