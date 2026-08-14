@@ -72,7 +72,7 @@ function DashboardPage() {
             <Badge variant="secondary" className="mb-3">Clinical console</Badge>
             <h1 className="text-3xl font-semibold">Welcome back, {displayName}</h1>
             <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-              Capture a patient encounter, then let the assistant structure it into a clinical note. Voice and AI analysis arrive in the next phase.
+              Capture a patient encounter by voice or text, then let the assistant structure it into an AI-generated clinical summary with a downloadable PDF report.
             </p>
           </div>
           <Button size="lg" onClick={() => startConsultation.mutate()} disabled={startConsultation.isPending}>
