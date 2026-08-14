@@ -291,13 +291,20 @@ function AssistantPage() {
               <Input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={ended ? "This consultation has ended." : "Or type the symptoms…"}
+                placeholder={
+                  ended ? "This consultation has ended." : loadingConsultation ? "Loading consultation…" : "Type the symptoms…"
+                }
                 disabled={disabled || ended || pending}
               />
-              <Button type="submit" size="icon" disabled={disabled || ended || pending || !draft.trim()}>
+              <Button
+                type="submit"
+                size="icon"
+                disabled={disabled || ended || pending || loadingConsultation || !draft.trim()}
+              >
                 {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               </Button>
             </form>
+
           </div>
 
           <div className="mt-3 flex items-center justify-between gap-3">
