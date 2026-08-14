@@ -1,6 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { generateConsultationPdf } from "./pdf-report.server";
+import type { ExtractionResult } from "./consultation-extraction";
+
 
 const IdSchema = z.object({ consultationId: z.string().uuid() });
 
