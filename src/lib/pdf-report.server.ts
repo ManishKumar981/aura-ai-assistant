@@ -176,16 +176,16 @@ function drawHeader(page: PDFPage, input: ReportInput, fontBold: PDFFont, font: 
 
   const colWidth = CONTENT_WIDTH / 2 - 8;
   for (let i = 0; i < leftColumn.length; i += 1) {
-    const [leftLabel, leftValue] = leftColumn[i];
-    const [rightLabel, rightValue] = rightColumn[i];
+    const [leftLabel, leftValue] = leftColumn[i]!;
+    const [rightLabel, rightValue] = rightColumn[i]!;
     page.drawText(`${leftLabel}:`, { x: MARGIN, y, size: 10, font: fontBold });
     page.drawText(leftValue, { x: MARGIN + 80, y, size: 10, font, color: rgb(0.15, 0.15, 0.15) });
     page.drawText(`${rightLabel}:`, { x: MARGIN + colWidth + 16, y, size: 10, font: fontBold });
     const rightValueWidth = font.widthOfTextAtSize(rightValue, 10);
-    page.drawText(rightValue, { x: MARGIN + colWidth + 16 + 100, y, size: 10, font, color: rgb(0.15, 0.15, 0.15) });
     if (rightLabel === "Report number" && rightValueWidth > colWidth - 100) {
-      // Draw on two lines if report number is too long
       page.drawText(rightValue.slice(0, 24) + "…", { x: MARGIN + colWidth + 16 + 100, y, size: 10, font, color: rgb(0.15, 0.15, 0.15) });
+    } else {
+      page.drawText(rightValue, { x: MARGIN + colWidth + 16 + 100, y, size: 10, font, color: rgb(0.15, 0.15, 0.15) });
     }
     y -= 18;
   }
@@ -194,6 +194,7 @@ function drawHeader(page: PDFPage, input: ReportInput, fontBold: PDFFont, font: 
   page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.5, color: rgb(0.85, 0.85, 0.85) });
   return y - 18;
 }
+
 
 function drawSection(page: PDFPage, y: number, title: string, fontBold: PDFFont) {
   ({ page, y } = ensureSpace(page, y, 22));
