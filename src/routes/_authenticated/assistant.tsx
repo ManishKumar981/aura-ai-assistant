@@ -140,7 +140,10 @@ function AssistantPage() {
   }
 
   const disabled = !consultationId;
-  const ended = consultation.data?.status !== "active";
+  // Only treat the consultation as ended once we actually have its row — while the
+  // query is loading `consultation.data` is undefined, which used to disable input.
+  const ended = Boolean(consultation.data) && consultation.data?.status !== "active";
+  const loadingConsultation = Boolean(consultationId) && consultation.isPending;
 
   return (
     <div className="space-y-6">
@@ -245,7 +248,7 @@ function AssistantPage() {
               size="icon"
               title={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
               aria-label={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
-              disabled={disabled || ended || pending || !voice.supported}
+              disabled={disabled || ended || pending || loadingConsultation || !voice.supported}
               onClick={() => {
                 if (voice.state === "LISTENING") {
                   voice.stopListening();
@@ -288,13 +291,20 @@ function AssistantPage() {
               <Input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={ended ? "This consultation has ended." : "Or type the symptoms…"}
+                placeholder={
+                  ended ? "This consultation has ended." : loadingConsultation ? "Loading consultation…" : "Type the symptoms…"
+                }
                 disabled={disabled || ended || pending}
               />
-              <Button type="submit" size="icon" disabled={disabled || ended || pending || !draft.trim()}>
+              <Button
+                type="submit"
+                size="icon"
+                disabled={disabled || ended || pending || loadingConsultation || !draft.trim()}
+              >
                 {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               </Button>
             </form>
+
           </div>
 
           <div className="mt-3 flex items-center justify-between gap-3">

@@ -90,8 +90,8 @@ export function useVoiceConversation({ onTranscript }: Options) {
         return;
       }
       setError(
-        code === "not-allowed"
-          ? "Microphone permission was denied. Use the text box instead."
+        code === "not-allowed" || code === "service-not-allowed"
+          ? "Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below."
           : `Speech recognition error: ${code ?? "unknown"}`,
       );
       setVoiceState("ERROR");
