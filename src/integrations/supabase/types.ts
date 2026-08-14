@@ -55,30 +55,45 @@ export type Database = {
           chief_complaint: string | null
           consultation_id: string
           created_at: string
+          extraction: Json | null
+          follow_up: string | null
+          generated_by: string | null
           id: string
           objective: string | null
+          overview: string | null
           plan: string | null
           subjective: string | null
+          updated_at: string
         }
         Insert: {
           assessment?: string | null
           chief_complaint?: string | null
           consultation_id: string
           created_at?: string
+          extraction?: Json | null
+          follow_up?: string | null
+          generated_by?: string | null
           id?: string
           objective?: string | null
+          overview?: string | null
           plan?: string | null
           subjective?: string | null
+          updated_at?: string
         }
         Update: {
           assessment?: string | null
           chief_complaint?: string | null
           consultation_id?: string
           created_at?: string
+          extraction?: Json | null
+          follow_up?: string | null
+          generated_by?: string | null
           id?: string
           objective?: string | null
+          overview?: string | null
           plan?: string | null
           subjective?: string | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -130,6 +145,7 @@ export type Database = {
           consultation_id: string
           content: string
           created_at: string
+          evidence: string | null
           id: string
         }
         Insert: {
@@ -138,6 +154,7 @@ export type Database = {
           consultation_id: string
           content: string
           created_at?: string
+          evidence?: string | null
           id?: string
         }
         Update: {
@@ -146,6 +163,7 @@ export type Database = {
           consultation_id?: string
           content?: string
           created_at?: string
+          evidence?: string | null
           id?: string
         }
         Relationships: [

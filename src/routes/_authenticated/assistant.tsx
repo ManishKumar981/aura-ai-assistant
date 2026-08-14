@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { sendPatientMessage, getAiDoctorStatus } from "@/lib/ai-doctor.functions";
+import { finalizeConsultation } from "@/lib/consultation.functions";
 import { useVoiceConversation, type VoiceState } from "@/hooks/use-voice-conversation";
 
 type AssistantSearch = { consultation?: string };
@@ -85,19 +86,24 @@ function AssistantPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.data?.length, pending]);
 
+  const finalize = useServerFn(finalizeConsultation);
+  const [ending, setEnding] = useState(false);
+
   async function endConsultation() {
-    if (!consultationId) return;
+    if (!consultationId || ending) return;
+    setEnding(true);
+    // 1 + 2: stop voice input and AI speech immediately.
     voiceRef.current.endSession();
-    const { error } = await supabase
-      .from("consultations")
-      .update({ status: "completed", ended_at: new Date().toISOString() })
-      .eq("id", consultationId);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      const result = await finalize({ data: { consultationId } });
+      toast.success(`Consultation completed — ${result.turns} turns preserved, ${result.points} points extracted.`);
+      await queryClient.invalidateQueries({ queryKey: ["consultations", "all"] });
+      navigate({ to: "/consultation/$id", params: { id: consultationId } });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not finish the consultation.");
+    } finally {
+      setEnding(false);
     }
-    toast.success("Consultation ended");
-    navigate({ to: "/history" });
   }
 
   const voice = useVoiceConversation({
@@ -302,9 +308,10 @@ function AssistantPage() {
               variant="destructive"
               size="sm"
               onClick={endConsultation}
-              disabled={disabled || ended}
+              disabled={disabled || ended || ending}
             >
-              <Square className="size-4" /> End consultation
+              {ending ? <Loader2 className="size-4 animate-spin" /> : <Square className="size-4" />}
+              {ending ? "Finalising…" : "End consultation"}
             </Button>
           </div>
         </div>
