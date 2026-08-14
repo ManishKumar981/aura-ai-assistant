@@ -1,11 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { Mic, Send, Square, Bot, User as UserIcon, Info } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useRef, useState } from "react";
+import { Mic, Send, Square, Bot, User as UserIcon, Info, ShieldAlert, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { sendPatientMessage, getAiDoctorStatus } from "@/lib/ai-doctor.functions";
 
 type AssistantSearch = { consultation?: string };
 
@@ -32,6 +35,13 @@ const ROLE_META = {
 function AssistantPage() {
   const { consultation: consultationId } = Route.useSearch();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const send = useServerFn(sendPatientMessage);
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const status = useQuery({ queryKey: ["ai-doctor-status"], queryFn: () => getAiDoctorStatus() });
 
   const consultation = useQuery({
     queryKey: ["consultation", consultationId],
@@ -61,6 +71,10 @@ function AssistantPage() {
     },
   });
 
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.data?.length, pending]);
+
   async function endConsultation() {
     if (!consultationId) return;
     const { error } = await supabase
@@ -75,7 +89,25 @@ function AssistantPage() {
     navigate({ to: "/history" });
   }
 
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const content = draft.trim();
+    if (!content || !consultationId || pending) return;
+    setPending(true);
+    setDraft("");
+    try {
+      await send({ data: { consultationId, content } });
+      await queryClient.invalidateQueries({ queryKey: ["messages", consultationId] });
+    } catch (error) {
+      setDraft(content);
+      toast.error(error instanceof Error ? error.message : "Could not reach the AI Doctor.");
+    } finally {
+      setPending(false);
+    }
+  }
+
   const disabled = !consultationId;
+  const ended = consultation.data?.status !== "active";
 
   return (
     <div className="space-y-6">
@@ -85,22 +117,35 @@ function AssistantPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {disabled
               ? "Start a consultation from the dashboard to begin capturing an encounter."
-              : "Voice capture and clinical reasoning arrive in the next phase."}
+              : "Describe the symptoms in plain language — the AI Doctor will take a structured history."}
           </p>
         </div>
-        {consultation.data && <Badge variant="secondary">{consultation.data.status}</Badge>}
+        <div className="flex items-center gap-2">
+          {status.data?.demo && <Badge variant="outline">Demo mode</Badge>}
+          {consultation.data && <Badge variant="secondary">{consultation.data.status}</Badge>}
+        </div>
       </header>
 
+      <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/60 p-4">
+        <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Medical disclaimer:</span> the AI Doctor is an information
+          assistant, not a licensed clinician. It does not provide a confirmed diagnosis and does not prescribe
+          medication. Always have a qualified clinician review this conversation, and seek emergency care immediately
+          for severe or worsening symptoms.
+        </p>
+      </div>
+
       <section className="clinical-panel flex min-h-[28rem] flex-col">
-        <div className="flex-1 space-y-4 overflow-y-auto p-6">
+        <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-6">
           {!disabled && messages.data?.length === 0 && (
             <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-foreground">
                 <Bot className="size-5" />
               </span>
-              <p className="mt-3 text-sm font-medium">Conversation area</p>
+              <p className="mt-3 text-sm font-medium">Start the conversation</p>
               <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                Patient, AI Doctor and system turns will stream here once the assistant is connected.
+                Describe the presenting complaint — the assistant will ask about duration, severity and warning signs.
               </p>
             </div>
           )}
@@ -122,30 +167,56 @@ function AssistantPage() {
                   <p className="text-xs font-medium text-muted-foreground">
                     {meta.label} · {new Date(m.timestamp).toLocaleTimeString()}
                   </p>
-                  <p className="mt-1 text-sm">{m.content}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm">{m.content}</p>
                 </div>
               </div>
             );
           })}
+
+          {pending && (
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary">
+                <Bot className="size-4" />
+              </span>
+              <span className="flex items-center gap-2">
+                <Loader2 className="size-3.5 animate-spin" /> AI Doctor is thinking…
+              </span>
+            </div>
+          )}
         </div>
 
-        <div className="border-t border-border p-4">
+        <form onSubmit={submit} className="border-t border-border p-4">
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="icon" disabled title="Voice capture coming soon">
               <Mic className="size-4" />
             </Button>
-            <Input placeholder="Describe the symptoms…" disabled />
-            <Button type="button" size="icon" disabled title="Sending coming soon">
-              <Send className="size-4" />
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={ended ? "This consultation has ended." : "Describe the symptoms…"}
+              disabled={disabled || ended || pending}
+            />
+            <Button type="submit" size="icon" disabled={disabled || ended || pending || !draft.trim()}>
+              {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
             </Button>
           </div>
-          <div className="mt-3 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">Input, microphone and AI replies are placeholders in this build.</p>
-            <Button type="button" variant="destructive" size="sm" onClick={endConsultation} disabled={disabled || consultation.data?.status !== "active"}>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              {status.data?.demo
+                ? "Demo mode: scripted history-taking replies, no external AI provider is called."
+                : "Responses are generated server-side; nothing is sent from your browser to the AI provider."}
+            </p>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={endConsultation}
+              disabled={disabled || ended}
+            >
               <Square className="size-4" /> End consultation
             </Button>
           </div>
-        </div>
+        </form>
       </section>
     </div>
   );
