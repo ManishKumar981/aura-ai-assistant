@@ -2,13 +2,14 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
-import { Mic, Send, Square, Bot, User as UserIcon, Info, ShieldAlert, Loader2 } from "lucide-react";
+import { Mic, MicOff, Send, Square, Bot, User as UserIcon, Info, ShieldAlert, Loader2, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { sendPatientMessage, getAiDoctorStatus } from "@/lib/ai-doctor.functions";
+import { useVoiceConversation, type VoiceState } from "@/hooks/use-voice-conversation";
 
 type AssistantSearch = { consultation?: string };
 
@@ -25,6 +26,15 @@ export const Route = createFileRoute("/_authenticated/assistant")({
   }),
   component: AssistantPage,
 });
+
+const VOICE_STATE_META: Record<VoiceState, { label: string; hint: string; tone: string }> = {
+  IDLE: { label: "Idle", hint: "Tap the microphone to speak.", tone: "bg-muted text-muted-foreground" },
+  LISTENING: { label: "Listening", hint: "Listening — speak now, then pause.", tone: "bg-primary text-primary-foreground" },
+  PROCESSING: { label: "Processing", hint: "Sending your words to the AI Doctor…", tone: "bg-secondary text-secondary-foreground" },
+  SPEAKING: { label: "Speaking", hint: "AI Doctor is speaking.", tone: "bg-accent text-accent-foreground" },
+  ENDED: { label: "Ended", hint: "Voice session ended.", tone: "bg-muted text-muted-foreground" },
+  ERROR: { label: "Error", hint: "Voice unavailable — use the text box.", tone: "bg-destructive text-destructive-foreground" },
+};
 
 const ROLE_META = {
   PATIENT: { label: "Patient", icon: UserIcon },
@@ -77,6 +87,7 @@ function AssistantPage() {
 
   async function endConsultation() {
     if (!consultationId) return;
+    voiceRef.current.endSession();
     const { error } = await supabase
       .from("consultations")
       .update({ status: "completed", ended_at: new Date().toISOString() })
@@ -89,21 +100,37 @@ function AssistantPage() {
     navigate({ to: "/history" });
   }
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    const content = draft.trim();
-    if (!content || !consultationId || pending) return;
+  const voice = useVoiceConversation({
+    onTranscript: (text) => {
+      void sendMessage(text, true);
+    },
+  });
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+
+  async function sendMessage(content: string, spoken = false) {
+    const text = content.trim();
+    if (!text || !consultationId || pending) return;
     setPending(true);
-    setDraft("");
+    if (!spoken) setDraft("");
     try {
-      await send({ data: { consultationId, content } });
+      const result = await send({ data: { consultationId, content: text } });
       await queryClient.invalidateQueries({ queryKey: ["messages", consultationId] });
+      if (spoken || voiceRef.current.autoMode) {
+        voiceRef.current.speak(result.doctorMessage.content);
+      }
     } catch (error) {
-      setDraft(content);
+      if (!spoken) setDraft(text);
+      voiceRef.current.setVoiceState("ERROR");
       toast.error(error instanceof Error ? error.message : "Could not reach the AI Doctor.");
     } finally {
       setPending(false);
     }
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    await sendMessage(draft);
   }
 
   const disabled = !consultationId;
@@ -185,21 +212,85 @@ function AssistantPage() {
           )}
         </div>
 
-        <form onSubmit={submit} className="border-t border-border p-4">
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" size="icon" disabled title="Voice capture coming soon">
-              <Mic className="size-4" />
-            </Button>
-            <Input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={ended ? "This consultation has ended." : "Describe the symptoms…"}
-              disabled={disabled || ended || pending}
-            />
-            <Button type="submit" size="icon" disabled={disabled || ended || pending || !draft.trim()}>
-              {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            </Button>
+        <div className="border-t border-border p-4">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Badge className={VOICE_STATE_META[voice.state].tone}>{VOICE_STATE_META[voice.state].label}</Badge>
+            <span className="text-xs text-muted-foreground">{VOICE_STATE_META[voice.state].hint}</span>
+            {!voice.supported && (
+              <span className="text-xs text-muted-foreground">
+                Speech recognition unavailable in this browser — text input is used instead.
+              </span>
+            )}
           </div>
+
+          {(voice.transcript || voice.error) && (
+            <div className="mb-3 rounded-md border border-border bg-muted/50 px-3 py-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                {voice.error ? "Voice error" : "Transcript preview"}
+              </p>
+              <p className="mt-1 text-sm">{voice.error ?? voice.transcript}</p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant={voice.state === "LISTENING" ? "default" : "outline"}
+              size="icon"
+              title={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
+              aria-label={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
+              disabled={disabled || ended || pending || !voice.supported}
+              onClick={() => {
+                if (voice.state === "LISTENING") {
+                  voice.stopListening();
+                } else {
+                  voice.reset();
+                  voice.setAutoMode(true);
+                  voice.startListening();
+                }
+              }}
+            >
+              {voice.state === "LISTENING" ? <MicOff className="size-4" /> : <Mic className="size-4" />}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              title={voice.muted ? "Unmute AI voice" : "Mute AI voice"}
+              aria-label={voice.muted ? "Unmute AI voice" : "Mute AI voice"}
+              onClick={() => voice.setMuted(!voice.muted)}
+            >
+              {voice.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                voice.setAutoMode(false);
+                voice.stopSpeaking();
+                voice.cancelListening();
+              }}
+              disabled={voice.state !== "SPEAKING" && voice.state !== "LISTENING"}
+            >
+              Stop speaking
+            </Button>
+
+            <form onSubmit={submit} className="flex min-w-[16rem] flex-1 items-center gap-2">
+              <Input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={ended ? "This consultation has ended." : "Or type the symptoms…"}
+                disabled={disabled || ended || pending}
+              />
+              <Button type="submit" size="icon" disabled={disabled || ended || pending || !draft.trim()}>
+                {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+              </Button>
+            </form>
+          </div>
+
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
               {status.data?.demo
@@ -216,7 +307,7 @@ function AssistantPage() {
               <Square className="size-4" /> End consultation
             </Button>
           </div>
-        </form>
+        </div>
       </section>
     </div>
   );
