@@ -132,5 +132,43 @@ export const finalizeConsultation = createServerFn({ method: "POST" })
       .upsert(summaryRow, { onConflict: "consultation_id" });
     if (summaryError) throw new Error(summaryError.message);
 
-    return { consultationId: data.consultationId, turns: turns.length, points: rows.length, generatedBy };
+    // Generate and store the PDF report.
+    const { generateAndUploadPdf } = await import("./pdf.server");
+
+    const { data: consultationDetails, error: detailsError } = await supabase
+      .from("consultations")
+      .select("id, title, started_at, ended_at")
+      .eq("id", data.consultationId)
+      .maybeSingle();
+    if (detailsError) throw new Error(detailsError.message);
+    if (!consultationDetails) throw new Error("Consultation not found after update.");
+    if (!consultationDetails.ended_at) {
+      throw new Error("Consultation end time is missing after completion.");
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", userId)
+      .maybeSingle();
+    if (profileError) throw new Error(profileError.message);
+
+    const pdfUrl = await generateAndUploadPdf(
+      supabase,
+      userId,
+      consultationDetails,
+      profile ?? null,
+      summaryRow,
+      rows,
+      turns,
+    );
+
+    const { error: pdfUpdateError } = await supabase
+      .from("consultations")
+      .update({ pdf_url: pdfUrl })
+      .eq("id", data.consultationId);
+    if (pdfUpdateError) throw new Error(pdfUpdateError.message);
+
+    return { consultationId: data.consultationId, turns: turns.length, points: rows.length, generatedBy, pdfUrl };
   });
+
