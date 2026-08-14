@@ -150,8 +150,8 @@ function ResultsPage() {
             {isGeneratingPdf ? "Generating PDF…" : "Download PDF"}
           </Button>
         </div>
-
       </header>
+
 
       <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/60 p-4">
         <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
