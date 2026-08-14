@@ -3,6 +3,20 @@ import { useQuery } from "@tanstack/react-query";
 import { Clock, Stethoscope } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { RISK_LABELS, type RiskLevel } from "@/lib/consultation-extraction";
+
+type SummaryRel = { chief_complaint: string | null; risk_level: string | null };
+
+function summaryOf(row: { consultation_summaries: SummaryRel | SummaryRel[] | null }): SummaryRel | null {
+  const rel = row.consultation_summaries;
+  if (!rel) return null;
+  return Array.isArray(rel) ? rel[0] ?? null : rel;
+}
+
+function riskVariant(level: string | null | undefined) {
+  if (level === "emergency" || level === "high") return "destructive" as const;
+  return "outline" as const;
+}
 
 export const Route = createFileRoute("/_authenticated/history")({
   head: () => ({
@@ -22,7 +36,7 @@ function HistoryPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("consultations")
-        .select("id, title, status, created_at, ended_at")
+        .select("id, title, status, created_at, ended_at, consultation_summaries(chief_complaint, risk_level)")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
@@ -54,13 +68,21 @@ function HistoryPage() {
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{c.title}</p>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                Chief complaint: {summaryOf(c)?.chief_complaint?.trim() || "Not reported"}
+              </p>
               <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
                 <Clock className="size-3" />
                 {new Date(c.created_at).toLocaleString()}
                 {c.ended_at ? ` · ended ${new Date(c.ended_at).toLocaleTimeString()}` : ""}
               </p>
             </div>
-            <Badge variant={c.status === "active" ? "default" : "secondary"}>{c.status}</Badge>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge variant={riskVariant(summaryOf(c)?.risk_level)}>
+                Risk: {summaryOf(c)?.risk_level ? RISK_LABELS[summaryOf(c)!.risk_level as RiskLevel] ?? summaryOf(c)!.risk_level : "—"}
+              </Badge>
+              <Badge variant={c.status === "active" ? "default" : "secondary"}>{c.status}</Badge>
+            </div>
           </Link>
         ))}
       </div>
