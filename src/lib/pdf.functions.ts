@@ -58,6 +58,10 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
       .order("timestamp", { ascending: true });
     if (transcriptError) throw new Error(transcriptError.message);
 
+    const extraction: Record<string, unknown> | null = summary?.extraction
+      ? (summary.extraction as Record<string, unknown>)
+      : null;
+
     const pdfBytes = await generateConsultationPdf({
       consultationId: consultation.id,
       title: consultation.title,
@@ -65,10 +69,11 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
       endedAt: consultation.ended_at,
       profile: profile ?? null,
       summary: summary ?? null,
-      extraction: summary?.extraction ? (summary.extraction as Record<string, unknown>) : null,
+      extraction: extraction as never,
       points: points ?? [],
       transcript: transcript ?? [],
     });
+
 
     const path = `${userId}/${consultation.id}.pdf`;
     const { error: uploadError } = await supabase.storage
