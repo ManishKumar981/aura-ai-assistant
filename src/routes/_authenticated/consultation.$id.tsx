@@ -1,9 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Bot, ClipboardList, FileText, Info, ShieldAlert, User as UserIcon } from "lucide-react";
+import { ArrowLeft, Bot, ClipboardList, Download, FileText, Info, ShieldAlert, User as UserIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CATEGORY_LABELS, POINT_CATEGORIES } from "@/lib/consultation-extraction";
+import { useServerFn } from "@tanstack/react-start";
+import { getConsultationPdfUrl, generateConsultationPdfUrl } from "@/lib/pdf.functions";
+import { useState } from "react";
+
 
 export const Route = createFileRoute("/_authenticated/consultation/$id")({
   head: () => ({
