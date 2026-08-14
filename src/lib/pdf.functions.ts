@@ -1,9 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import { generateConsultationPdf } from "./pdf-report.server";
-import type { ExtractionResult } from "./consultation-extraction";
-
 
 const IdSchema = z.object({ consultationId: z.string().uuid() });
 
@@ -19,6 +16,7 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => IdSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const { generateAndUploadPdf } = await import("./pdf.server");
 
     const { data: consultation, error: consultationError } = await supabase
       .from("consultations")
@@ -30,6 +28,9 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
     if (!consultation) throw new Error("Consultation not found.");
     if (consultation.status !== "completed") {
       throw new Error("The consultation must be completed before generating a PDF.");
+    }
+    if (!consultation.ended_at) {
+      throw new Error("Consultation end time is missing.");
     }
 
     const { data: profile, error: profileError } = await supabase
@@ -60,44 +61,23 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
       .order("timestamp", { ascending: true });
     if (transcriptError) throw new Error(transcriptError.message);
 
-    const extraction: Record<string, unknown> | null = summary?.extraction
-      ? (summary.extraction as Record<string, unknown>)
-      : null;
-
-    const pdfBytes = await generateConsultationPdf({
-      consultationId: consultation.id,
-      title: consultation.title,
-      startedAt: consultation.started_at,
-      endedAt: consultation.ended_at,
-      profile: profile ?? null,
-      summary: summary ?? null,
-      extraction: extraction as ExtractionResult,
-      points: points ?? [],
-      transcript: transcript ?? [],
-    });
-
-
-    const path = `${userId}/${consultation.id}.pdf`;
-    const { error: uploadError } = await supabase.storage
-      .from("consultation-pdfs")
-      .upload(path, pdfBytes, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-    if (uploadError) throw new Error(uploadError.message);
-
-    const { data: signedUrl, error: signedError } = await supabase.storage
-      .from("consultation-pdfs")
-      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-    if (signedError) throw new Error(signedError.message);
+    const pdfUrl = await generateAndUploadPdf(
+      supabase,
+      userId,
+      consultation,
+      profile ?? null,
+      summary ?? null,
+      points ?? [],
+      transcript ?? [],
+    );
 
     const { error: updateError } = await supabase
       .from("consultations")
-      .update({ pdf_url: signedUrl.signedUrl })
+      .update({ pdf_url: pdfUrl })
       .eq("id", data.consultationId);
     if (updateError) throw new Error(updateError.message);
 
-    return { pdfUrl: signedUrl.signedUrl };
+    return { pdfUrl };
   });
 
 /**
@@ -109,7 +89,7 @@ export const getConsultationPdfUrl = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => IdSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const path = `${userId}/${data.consultationId}.pdf`;
+    const { createFreshSignedUrl } = await import("./pdf.server");
 
     const { data: consultation, error: consultationError } = await supabase
       .from("consultations")
@@ -120,10 +100,6 @@ export const getConsultationPdfUrl = createServerFn({ method: "POST" })
     if (consultationError) throw new Error(consultationError.message);
     if (!consultation) throw new Error("Consultation not found.");
 
-    const { data: signedUrl, error: signedError } = await supabase.storage
-      .from("consultation-pdfs")
-      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-    if (signedError) throw new Error(signedError.message);
-
-    return { pdfUrl: signedUrl.signedUrl };
+    const pdfUrl = await createFreshSignedUrl(supabase, userId, data.consultationId);
+    return { pdfUrl };
   });
