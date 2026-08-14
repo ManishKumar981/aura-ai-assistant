@@ -5,7 +5,7 @@
  * no provider key is configured (demo mode).
  */
 import { aiDoctorConfig } from "./ai-doctor.server";
-import { EMPTY_EXTRACTION, type ExtractionResult } from "./consultation-extraction";
+import { EMPTY_EXTRACTION, RISK_LEVELS, deriveRiskLevel, type ExtractionResult, type RiskLevel } from "./consultation-extraction";
 
 export type TranscriptTurn = { role: string; content: string; timestamp: string };
 
@@ -32,6 +32,7 @@ Respond with ONLY a JSON object, no markdown fences, using exactly this shape:
   "risk_indicators": string[],
   "recommendations": string[],
   "follow_up": string|null,
+  "risk_level": "low"|"moderate"|"high"|"emergency"|null,
   "summary": string
 }`;
 
@@ -47,6 +48,12 @@ function asNullableString(value: unknown): string | null {
   const trimmed = value.trim();
   if (!trimmed || trimmed.toLowerCase() === "not reported" || trimmed.toLowerCase() === "null") return null;
   return trimmed;
+}
+
+function asRiskLevel(value: unknown): RiskLevel | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  return (RISK_LEVELS as readonly string[]).includes(v) ? (v as RiskLevel) : null;
 }
 
 export function normaliseExtraction(raw: unknown): ExtractionResult {
@@ -79,6 +86,7 @@ export function normaliseExtraction(raw: unknown): ExtractionResult {
     risk_indicators: asStringArray(obj["risk_indicators"]),
     recommendations: asStringArray(obj["recommendations"]),
     follow_up: asNullableString(obj["follow_up"]),
+    risk_level: asRiskLevel(obj["risk_level"]),
     summary: asNullableString(obj["summary"]) ?? "",
   };
 }
@@ -128,6 +136,10 @@ const SYMPTOM_TERMS = [
   "stomach pain", "abdominal pain", "insomnia", "swelling", "itching", "blurred vision",
   "palpitations", "sweating", "weakness", "loss of appetite", "vomited",
 ];
+
+function withRisk(extraction: ExtractionResult): ExtractionResult {
+  return { ...extraction, risk_level: extraction.risk_level ?? deriveRiskLevel(extraction.risk_indicators) };
+}
 
 export function literalExtraction(turns: TranscriptTurn[]): ExtractionResult {
   const patient = turns.filter((t) => t.role === "PATIENT");
@@ -251,7 +263,7 @@ export async function analyseTranscript(
   }
 
   const { apiKey, baseUrl, model, demo } = aiDoctorConfig();
-  if (demo) return { extraction: literalExtraction(relevant), generatedBy: "rules" };
+  if (demo) return { extraction: withRisk(literalExtraction(relevant)), generatedBy: "rules" };
 
   try {
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -277,9 +289,10 @@ export async function analyseTranscript(
     if (!parsed) throw new Error("unparsable extraction");
     const extraction = normaliseExtraction(parsed);
     if (!extraction.summary) extraction.summary = literalExtraction(relevant).summary;
+    if (!extraction.risk_level) extraction.risk_level = deriveRiskLevel(extraction.risk_indicators);
     return { extraction, generatedBy: model };
   } catch (error) {
     console.error("Extraction failed, falling back to literal extractor", error);
-    return { extraction: literalExtraction(relevant), generatedBy: "rules-fallback" };
+    return { extraction: withRisk(literalExtraction(relevant)), generatedBy: "rules-fallback" };
   }
 }

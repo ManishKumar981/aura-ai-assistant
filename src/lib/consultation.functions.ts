@@ -122,6 +122,7 @@ export const finalizeConsultation = createServerFn({ method: "POST" })
       plan: extraction.recommendations.join("\n") || "Not reported",
       overview: extraction.summary,
       follow_up: extraction.follow_up ?? "Not reported",
+      risk_level: extraction.risk_level ?? "low",
       extraction: JSON.parse(JSON.stringify(extraction)),
       generated_by: generatedBy,
       updated_at: new Date().toISOString(),

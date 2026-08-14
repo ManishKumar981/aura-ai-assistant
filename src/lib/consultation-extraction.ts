@@ -19,8 +19,30 @@ export type ExtractionResult = {
   risk_indicators: string[];
   recommendations: string[];
   follow_up: string | null;
+  risk_level: RiskLevel | null;
   summary: string;
 };
+
+export const RISK_LEVELS = ["low", "moderate", "high", "emergency"] as const;
+export type RiskLevel = (typeof RISK_LEVELS)[number];
+
+export const RISK_LABELS: Record<RiskLevel, string> = {
+  low: "Low",
+  moderate: "Moderate",
+  high: "High",
+  emergency: "Emergency",
+};
+
+/** Conservative, transparent triage level derived only from what was said. */
+export function deriveRiskLevel(riskIndicators: string[]): RiskLevel {
+  const text = riskIndicators.join(" ").toLowerCase();
+  if (!text.trim()) return "low";
+  if (/(chest pain|slurred speech|unconscious|seizure|severe bleeding|suicidal|weakness on one side|blood in)/.test(text)) {
+    return "emergency";
+  }
+  if (/(shortness of breath|breathless|fainting|fainted|high fever|neck stiffness|numbness)/.test(text)) return "high";
+  return "moderate";
+}
 
 export const EMPTY_EXTRACTION: ExtractionResult = {
   chief_complaint: null,
@@ -34,6 +56,7 @@ export const EMPTY_EXTRACTION: ExtractionResult = {
   risk_indicators: [],
   recommendations: [],
   follow_up: null,
+  risk_level: null,
   summary: "",
 };
 
