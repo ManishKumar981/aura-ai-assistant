@@ -47,13 +47,14 @@ function ResultsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("consultations")
-        .select("id, title, status, started_at, ended_at")
+        .select("id, title, status, started_at, ended_at, pdf_url")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
       return data;
     },
   });
+
 
   const summary = useQuery({
     queryKey: ["summary", id],
