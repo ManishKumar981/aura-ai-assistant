@@ -1,0 +1,1 @@
+ALTER TABLE public.consultation_summaries ADD COLUMN IF NOT EXISTS risk_level text;
