@@ -126,7 +126,9 @@ function AssistantPage() {
         voiceRef.current.speak(result.doctorMessage.content);
       }
     } catch (error) {
-      if (!spoken) setDraft(text);
+      // The patient turn may already be persisted (the AI reply is what failed) —
+      // refetch so the transcript stays accurate and the user doesn't resend a duplicate.
+      await queryClient.invalidateQueries({ queryKey: ["messages", consultationId] });
       voiceRef.current.setVoiceState("ERROR");
       toast.error(error instanceof Error ? error.message : "Could not reach the AI Doctor.");
     } finally {
