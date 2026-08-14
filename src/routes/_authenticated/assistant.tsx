@@ -248,7 +248,7 @@ function AssistantPage() {
               size="icon"
               title={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
               aria-label={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
-              disabled={disabled || ended || pending || !voice.supported}
+              disabled={disabled || ended || pending || loadingConsultation || !voice.supported}
               onClick={() => {
                 if (voice.state === "LISTENING") {
                   voice.stopListening();
