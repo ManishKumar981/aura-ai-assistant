@@ -245,7 +245,7 @@ function ensureSpace(page: PDFPage, y: number, needed: number) {
 function addFooterToAllPages(pdf: PDFDocument, font: PDFFont, consultationId: string) {
   const pages = pdf.getPages();
   for (let i = 0; i < pages.length; i += 1) {
-    const p = pages[i];
+    const p = pages[i]!;
     const left = `MediScribe AI · Confidential · Page ${i + 1} of ${pages.length}`;
     const right = `Report #${consultationId.slice(0, 8)}`;
     p.drawText(left, { x: MARGIN, y: 24, size: 8, font, color: rgb(0.5, 0.5, 0.5) });
@@ -254,6 +254,7 @@ function addFooterToAllPages(pdf: PDFDocument, font: PDFFont, consultationId: st
     p.drawLine({ start: { x: MARGIN, y: 36 }, end: { x: PAGE_WIDTH - MARGIN, y: 36 }, thickness: 0.5, color: rgb(0.85, 0.85, 0.85) });
   }
 }
+
 
 function wrapText(text: string, maxWidth: number, font: PDFFont, fontSize: number): string[] {
   const words = text.split(/\s+/);
