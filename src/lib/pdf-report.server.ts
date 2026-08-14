@@ -217,7 +217,8 @@ function drawField(page: PDFPage, y: number, label: string, value: string | null
   const lines = wrapText(text, CONTENT_WIDTH - 100, font, LINE_HEIGHT - 1);
   for (let i = 0; i < lines.length; i += 1) {
     ({ page, y } = ensureSpace(page, y, LINE_HEIGHT));
-    page.drawText(lines[i], { x: MARGIN + 100, y, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+    const line = lines[i]!;
+    page.drawText(line, { x: MARGIN + 100, y, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
     y -= LINE_HEIGHT;
   }
   return { page, y };
