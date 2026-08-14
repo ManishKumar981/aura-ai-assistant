@@ -1,0 +1,275 @@
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
+import { CATEGORY_LABELS, type ExtractionResult } from "./consultation-extraction";
+
+type Profile = {
+  full_name?: string | null;
+  email?: string | null;
+};
+
+type Message = {
+  role: string;
+  content: string;
+  timestamp: string;
+};
+
+type Summary = {
+  chief_complaint?: string | null;
+  subjective?: string | null;
+  objective?: string | null;
+  assessment?: string | null;
+  plan?: string | null;
+  overview?: string | null;
+  follow_up?: string | null;
+  generated_by?: string | null;
+};
+
+type MedicalPoint = {
+  category: string;
+  content: string;
+  evidence?: string | null;
+};
+
+type ReportInput = {
+  consultationId: string;
+  title: string;
+  startedAt: string;
+  endedAt?: string | null;
+  profile: Profile | null;
+  summary: Summary | null;
+  extraction: ExtractionResult | null;
+  points: MedicalPoint[];
+  transcript: Message[];
+};
+
+const PAGE_WIDTH = 612; // US Letter 8.5x11
+const PAGE_HEIGHT = 792;
+const MARGIN = 54;
+const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+const LINE_HEIGHT = 14;
+const SMALL_LINE_HEIGHT = 12;
+
+export async function generateConsultationPdf(input: ReportInput): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const fontOblique = await pdf.embedFont(StandardFonts.HelveticaOblique);
+
+  let page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  let y = drawHeader(page, input, fontBold, font, fontOblique);
+
+  // Summary section
+  ({ page, y } = drawSection(page, y, "Consultation Summary", fontBold));
+  const summary = input.summary;
+  const overview = summary?.overview?.trim() || "No summary overview available.";
+  ({ page, y } = drawWrappedText(page, y, overview, font, LINE_HEIGHT));
+  y -= 8;
+
+  ({ page, y } = drawField(page, y, "Chief complaint", summary?.chief_complaint ?? null, fontBold, font));
+  ({ page, y } = drawField(page, y, "Subjective", summary?.subjective ?? null, fontBold, font));
+  ({ page, y } = drawField(page, y, "Objective", summary?.objective ?? null, fontBold, font));
+  ({ page, y } = drawField(page, y, "Assessment", summary?.assessment ?? null, fontBold, font));
+  ({ page, y } = drawField(page, y, "Plan / recommendations", summary?.plan ?? null, fontBold, font));
+  ({ page, y } = drawField(page, y, "Follow-up", summary?.follow_up ?? null, fontBold, font));
+  y -= 12;
+
+  // Important points by category
+  ({ page, y } = drawSection(page, y, "Important Points", fontBold));
+  const groups = POINT_CATEGORIES.map((category) => ({
+    category,
+    label: CATEGORY_LABELS[category] ?? category,
+    items: input.points.filter((p) => p.category === category),
+  })).filter((g) => g.items.length > 0);
+
+  if (groups.length === 0) {
+    ({ page, y } = drawWrappedText(page, y, "No structured medical points were extracted from this conversation.", font, LINE_HEIGHT));
+  } else {
+    for (const group of groups) {
+      ({ page, y } = drawSubheading(page, y, group.label, fontBold));
+      for (const item of group.items) {
+        const lines = wrapText(`• ${item.content}`, CONTENT_WIDTH - 12, font, SMALL_LINE_HEIGHT - 1);
+        for (const line of lines) {
+          ({ page, y } = ensureSpace(page, y, LINE_HEIGHT));
+          page.drawText(line, { x: MARGIN + 12, y, size: 10, font });
+          y -= SMALL_LINE_HEIGHT;
+        }
+        if (item.evidence) {
+          const evidenceLines = wrapText(`  “${item.evidence}”`, CONTENT_WIDTH - 24, fontOblique, SMALL_LINE_HEIGHT - 1);
+          for (const line of evidenceLines) {
+            ({ page, y } = ensureSpace(page, y, SMALL_LINE_HEIGHT));
+            page.drawText(line, { x: MARGIN + 24, y, size: 9, font: fontOblique, color: rgb(0.35, 0.35, 0.35) });
+            y -= SMALL_LINE_HEIGHT;
+          }
+        }
+      }
+      y -= 4;
+    }
+  }
+  y -= 12;
+
+  // Full transcript
+  ({ page, y } = drawSection(page, y, "Full Transcript", fontBold));
+  if (input.transcript.length === 0) {
+    ({ page, y } = drawWrappedText(page, y, "No messages were recorded.", font, LINE_HEIGHT));
+  } else {
+    for (const m of input.transcript) {
+      const speaker = m.role === "PATIENT" ? "Patient" : m.role === "AI_DOCTOR" ? "AI Doctor" : m.role;
+      const time = new Date(m.timestamp).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" });
+      ({ page, y } = drawSubheading(page, y, `${speaker} · ${time}`, fontBold, 10));
+      const contentLines = wrapText(m.content, CONTENT_WIDTH, font, SMALL_LINE_HEIGHT - 1);
+      for (const line of contentLines) {
+        ({ page, y } = ensureSpace(page, y, SMALL_LINE_HEIGHT));
+        page.drawText(line, { x: MARGIN, y, size: 10, font });
+        y -= SMALL_LINE_HEIGHT;
+      }
+      y -= 6;
+    }
+  }
+
+  // Footer on every page
+  addFooterToAllPages(pdf, font, input.consultationId);
+
+  return pdf.save();
+}
+
+const POINT_CATEGORIES = [
+  "chief_complaint",
+  "symptom",
+  "duration",
+  "severity",
+  "medication",
+  "allergy",
+  "medical_history",
+  "negative_finding",
+  "risk_indicator",
+  "recommendation",
+  "follow_up",
+];
+
+function drawHeader(page: PDFPage, input: ReportInput, fontBold: PDFFont, font: PDFFont, fontOblique: PDFFont) {
+  const titleSize = 18;
+  const title = "Medical Consultation Report";
+  const titleWidth = fontBold.widthOfTextAtSize(title, titleSize);
+  page.drawText(title, { x: (PAGE_WIDTH - titleWidth) / 2, y: PAGE_HEIGHT - MARGIN - 20, size: titleSize, font: fontBold });
+
+  const subtitle = "AI-assisted consultation record — not a licensed clinical diagnosis.";
+  const subtitleWidth = fontOblique.widthOfTextAtSize(subtitle, 9);
+  page.drawText(subtitle, { x: (PAGE_WIDTH - subtitleWidth) / 2, y: PAGE_HEIGHT - MARGIN - 38, size: 9, font: fontOblique, color: rgb(0.4, 0.4, 0.4) });
+
+  let y = PAGE_HEIGHT - MARGIN - 62;
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 1, color: rgb(0.75, 0.75, 0.75) });
+  y -= 20;
+
+  const patientName = input.profile?.full_name?.trim() || "Not provided";
+  const reportDate = input.endedAt ? new Date(input.endedAt).toLocaleString("en-US") : new Date().toLocaleString("en-US");
+  const reportNumber = input.consultationId;
+
+  const leftColumn: [string, string][] = [
+    ["Patient", patientName],
+    ["Consultation", input.title],
+    ["Email", input.profile?.email?.trim() || "Not provided"],
+  ];
+  const rightColumn: [string, string][] = [
+    ["Report number", reportNumber],
+    ["Started", new Date(input.startedAt).toLocaleString("en-US")],
+    ["Ended", input.endedAt ? new Date(input.endedAt).toLocaleString("en-US") : "In progress"],
+  ];
+
+  const colWidth = CONTENT_WIDTH / 2 - 8;
+  for (let i = 0; i < leftColumn.length; i += 1) {
+    const [leftLabel, leftValue] = leftColumn[i];
+    const [rightLabel, rightValue] = rightColumn[i];
+    page.drawText(`${leftLabel}:`, { x: MARGIN, y, size: 10, font: fontBold });
+    page.drawText(leftValue, { x: MARGIN + 80, y, size: 10, font, color: rgb(0.15, 0.15, 0.15) });
+    page.drawText(`${rightLabel}:`, { x: MARGIN + colWidth + 16, y, size: 10, font: fontBold });
+    const rightValueWidth = font.widthOfTextAtSize(rightValue, 10);
+    page.drawText(rightValue, { x: MARGIN + colWidth + 16 + 100, y, size: 10, font, color: rgb(0.15, 0.15, 0.15) });
+    if (rightLabel === "Report number" && rightValueWidth > colWidth - 100) {
+      // Draw on two lines if report number is too long
+      page.drawText(rightValue.slice(0, 24) + "…", { x: MARGIN + colWidth + 16 + 100, y, size: 10, font, color: rgb(0.15, 0.15, 0.15) });
+    }
+    y -= 18;
+  }
+
+  y -= 6;
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.5, color: rgb(0.85, 0.85, 0.85) });
+  return y - 18;
+}
+
+function drawSection(page: PDFPage, y: number, title: string, fontBold: PDFFont) {
+  ({ page, y } = ensureSpace(page, y, 22));
+  page.drawText(title, { x: MARGIN, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  y -= 18;
+  return { page, y };
+}
+
+function drawSubheading(page: PDFPage, y: number, title: string, fontBold: PDFFont, size = 11) {
+  ({ page, y } = ensureSpace(page, y, size + 6));
+  page.drawText(title, { x: MARGIN, y, size, font: fontBold, color: rgb(0.25, 0.25, 0.25) });
+  y -= size + 4;
+  return { page, y };
+}
+
+function drawField(page: PDFPage, y: number, label: string, value: string | null, fontBold: PDFFont, font: PDFFont) {
+  ({ page, y } = ensureSpace(page, y, LINE_HEIGHT * 2));
+  page.drawText(`${label}:`, { x: MARGIN, y, size: 10, font: fontBold });
+  const text = value?.trim() || "Not reported";
+  const lines = wrapText(text, CONTENT_WIDTH - 100, font, LINE_HEIGHT - 1);
+  for (let i = 0; i < lines.length; i += 1) {
+    ({ page, y } = ensureSpace(page, y, LINE_HEIGHT));
+    page.drawText(lines[i], { x: MARGIN + 100, y, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+    y -= LINE_HEIGHT;
+  }
+  return { page, y };
+}
+
+function drawWrappedText(page: PDFPage, y: number, text: string, font: PDFFont, lineHeight: number) {
+  const lines = wrapText(text, CONTENT_WIDTH, font, lineHeight - 1);
+  for (const line of lines) {
+    ({ page, y } = ensureSpace(page, y, lineHeight));
+    page.drawText(line, { x: MARGIN, y, size: 10, font });
+    y -= lineHeight;
+  }
+  return { page, y };
+}
+
+function ensureSpace(page: PDFPage, y: number, needed: number) {
+  if (y - needed < MARGIN + 30) {
+    const newPage = page.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    return { page: newPage, y: PAGE_HEIGHT - MARGIN - 16 };
+  }
+  return { page, y };
+}
+
+function addFooterToAllPages(pdf: PDFDocument, font: PDFFont, consultationId: string) {
+  const pages = pdf.getPages();
+  for (let i = 0; i < pages.length; i += 1) {
+    const p = pages[i];
+    const left = `MediScribe AI · Confidential · Page ${i + 1} of ${pages.length}`;
+    const right = `Report #${consultationId.slice(0, 8)}`;
+    p.drawText(left, { x: MARGIN, y: 24, size: 8, font, color: rgb(0.5, 0.5, 0.5) });
+    const rightWidth = font.widthOfTextAtSize(right, 8);
+    p.drawText(right, { x: PAGE_WIDTH - MARGIN - rightWidth, y: 24, size: 8, font, color: rgb(0.5, 0.5, 0.5) });
+    p.drawLine({ start: { x: MARGIN, y: 36 }, end: { x: PAGE_WIDTH - MARGIN, y: 36 }, thickness: 0.5, color: rgb(0.85, 0.85, 0.85) });
+  }
+}
+
+function wrapText(text: string, maxWidth: number, font: PDFFont, fontSize: number): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (!word) continue;
+    const test = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(test, fontSize) <= maxWidth) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
+// Type-only helper import for PDFFont
+import type { PDFFont } from "pdf-lib";
