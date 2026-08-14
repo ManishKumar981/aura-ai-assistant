@@ -154,6 +154,12 @@ export const finalizeConsultation = createServerFn({ method: "POST" })
       .maybeSingle();
     if (profileError) throw new Error(profileError.message);
 
+    const { data: citations } = await supabase
+      .from("citations")
+      .select("source_title, source_url, snippet")
+      .eq("consultation_id", data.consultationId)
+      .order("created_at", { ascending: true });
+
     const pdfUrl = await generateAndUploadPdf(
       supabase,
       userId,
@@ -162,6 +168,7 @@ export const finalizeConsultation = createServerFn({ method: "POST" })
       summaryRow,
       rows,
       turns,
+      citations ?? [],
     );
 
     const { error: pdfUpdateError } = await supabase

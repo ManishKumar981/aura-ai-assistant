@@ -42,7 +42,7 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
 
     const { data: summary, error: summaryError } = await supabase
       .from("consultation_summaries")
-      .select("chief_complaint, subjective, objective, assessment, plan, overview, follow_up, generated_by, extraction")
+      .select("chief_complaint, subjective, objective, assessment, plan, overview, follow_up, risk_level, generated_by, extraction")
       .eq("consultation_id", data.consultationId)
       .maybeSingle();
     if (summaryError) throw new Error(summaryError.message);
@@ -61,6 +61,12 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
       .order("timestamp", { ascending: true });
     if (transcriptError) throw new Error(transcriptError.message);
 
+    const { data: citations } = await supabase
+      .from("citations")
+      .select("source_title, source_url, snippet")
+      .eq("consultation_id", data.consultationId)
+      .order("created_at", { ascending: true });
+
     const pdfUrl = await generateAndUploadPdf(
       supabase,
       userId,
@@ -74,6 +80,7 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
         : null,
       points ?? [],
       transcript ?? [],
+      citations ?? [],
     );
 
 
