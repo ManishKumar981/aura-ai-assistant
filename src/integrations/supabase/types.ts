@@ -110,6 +110,7 @@ export type Database = {
           created_at: string
           ended_at: string | null
           id: string
+          pdf_url: string | null
           started_at: string
           status: string
           title: string
@@ -120,6 +121,7 @@ export type Database = {
           created_at?: string
           ended_at?: string | null
           id?: string
+          pdf_url?: string | null
           started_at?: string
           status?: string
           title?: string
@@ -130,6 +132,7 @@ export type Database = {
           created_at?: string
           ended_at?: string | null
           id?: string
+          pdf_url?: string | null
           started_at?: string
           status?: string
           title?: string

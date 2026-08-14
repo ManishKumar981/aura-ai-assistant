@@ -1,9 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Bot, ClipboardList, FileText, Info, ShieldAlert, User as UserIcon } from "lucide-react";
+import { ArrowLeft, Bot, ClipboardList, Download, FileText, Info, ShieldAlert, User as UserIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CATEGORY_LABELS, POINT_CATEGORIES } from "@/lib/consultation-extraction";
+import { useServerFn } from "@tanstack/react-start";
+import { getConsultationPdfUrl, generateConsultationPdfUrl } from "@/lib/pdf.functions";
+import { useState } from "react";
+
 
 export const Route = createFileRoute("/_authenticated/consultation/$id")({
   head: () => ({
@@ -36,19 +41,42 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 
 function ResultsPage() {
   const { id } = Route.useParams();
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const getPdfUrl = useServerFn(getConsultationPdfUrl);
+  const generatePdf = useServerFn(generateConsultationPdfUrl);
+
+  const handleDownload = async () => {
+    if (!id) return;
+    setIsGeneratingPdf(true);
+    try {
+      let url = consultation.data?.pdf_url;
+      if (!url) {
+        const result = await generatePdf({ data: { consultationId: id } });
+        url = result.pdfUrl;
+      } else {
+        const result = await getPdfUrl({ data: { consultationId: id } });
+        url = result.pdfUrl;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
 
   const consultation = useQuery({
     queryKey: ["consultation", id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("consultations")
-        .select("id, title, status, started_at, ended_at")
+        .select("id, title, status, started_at, ended_at, pdf_url")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
       return data;
     },
   });
+
 
   const summary = useQuery({
     queryKey: ["summary", id],
@@ -111,8 +139,19 @@ function ResultsPage() {
         <div className="flex items-center gap-2">
           {consultation.data && <Badge variant="secondary">{consultation.data.status}</Badge>}
           <Badge variant="outline">{transcript.data?.length ?? 0} turns preserved</Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownload}
+            disabled={isGeneratingPdf || consultation.data?.status !== "completed"}
+            className="gap-2"
+          >
+            <Download className="size-4" />
+            {isGeneratingPdf ? "Generating PDF…" : "Download PDF"}
+          </Button>
         </div>
       </header>
+
 
       <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/60 p-4">
         <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
