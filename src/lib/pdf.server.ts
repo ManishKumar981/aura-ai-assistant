@@ -35,8 +35,9 @@ type ConsultationInfo = {
   id: string;
   title: string;
   started_at: string;
-  ended_at?: string | null;
+  ended_at: string | null;
 };
+
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
