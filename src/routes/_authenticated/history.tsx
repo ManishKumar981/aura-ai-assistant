@@ -47,8 +47,9 @@ function HistoryPage() {
         {consultations.data?.map((c) => (
           <Link
             key={c.id}
-            to="/assistant"
-            search={{ consultation: c.id }}
+            {...(c.status === "active"
+              ? ({ to: "/assistant", search: { consultation: c.id } } as const)
+              : ({ to: "/consultation/$id", params: { id: c.id } } as const))}
             className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-secondary"
           >
             <div className="min-w-0">
