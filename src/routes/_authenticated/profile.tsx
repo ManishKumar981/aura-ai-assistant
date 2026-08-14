@@ -45,7 +45,7 @@ function ProfilePage() {
     mutationFn: async () => {
       const { error } = await supabase
         .from("profiles")
-        .upsert({ id: user.id, email: user.email, full_name: fullName, specialty, updated_at: new Date().toISOString() });
+        .upsert({ id: user.id, email: user.email ?? null, full_name: fullName, specialty, updated_at: new Date().toISOString() });
       if (error) throw error;
     },
     onSuccess: () => {
