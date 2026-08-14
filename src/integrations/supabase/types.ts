@@ -62,6 +62,7 @@ export type Database = {
           objective: string | null
           overview: string | null
           plan: string | null
+          risk_level: string | null
           subjective: string | null
           updated_at: string
         }
@@ -77,6 +78,7 @@ export type Database = {
           objective?: string | null
           overview?: string | null
           plan?: string | null
+          risk_level?: string | null
           subjective?: string | null
           updated_at?: string
         }
@@ -92,6 +94,7 @@ export type Database = {
           objective?: string | null
           overview?: string | null
           plan?: string | null
+          risk_level?: string | null
           subjective?: string | null
           updated_at?: string
         }

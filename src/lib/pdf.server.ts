@@ -16,7 +16,14 @@ type Summary = {
   plan?: string | null;
   overview?: string | null;
   follow_up?: string | null;
+  risk_level?: string | null;
   generated_by?: string | null;
+};
+
+type Citation = {
+  source_title: string;
+  source_url?: string | null;
+  snippet?: string | null;
 };
 
 type MedicalPoint = {
@@ -54,6 +61,7 @@ export async function generateAndUploadPdf(
   summary: (Summary & { extraction?: ExtractionResult | null }) | null,
   points: MedicalPoint[],
   transcript: Message[],
+  citations: Citation[] = [],
 ): Promise<string> {
   const pdfBytes = await generateConsultationPdf({
     consultationId: consultation.id,
@@ -65,6 +73,7 @@ export async function generateAndUploadPdf(
     extraction: summary?.extraction ?? null,
     points,
     transcript,
+    citations,
   });
 
   const path = `${userId}/${consultation.id}.pdf`;
