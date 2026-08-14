@@ -139,7 +139,18 @@ function ResultsPage() {
         <div className="flex items-center gap-2">
           {consultation.data && <Badge variant="secondary">{consultation.data.status}</Badge>}
           <Badge variant="outline">{transcript.data?.length ?? 0} turns preserved</Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownload}
+            disabled={isGeneratingPdf || consultation.data?.status !== "completed"}
+            className="gap-2"
+          >
+            <Download className="size-4" />
+            {isGeneratingPdf ? "Generating PDF…" : "Download PDF"}
+          </Button>
         </div>
+
       </header>
 
       <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/60 p-4">
