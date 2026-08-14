@@ -66,10 +66,16 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
       userId,
       consultation,
       profile ?? null,
-      summary ?? null,
+      summary
+        ? {
+            ...summary,
+            extraction: (summary.extraction as import("./consultation-extraction").ExtractionResult | null) ?? null,
+          }
+        : null,
       points ?? [],
       transcript ?? [],
     );
+
 
     const { error: updateError } = await supabase
       .from("consultations")
