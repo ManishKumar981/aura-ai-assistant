@@ -140,7 +140,10 @@ function AssistantPage() {
   }
 
   const disabled = !consultationId;
-  const ended = consultation.data?.status !== "active";
+  // Only treat the consultation as ended once we actually have its row — while the
+  // query is loading `consultation.data` is undefined, which used to disable input.
+  const ended = Boolean(consultation.data) && consultation.data?.status !== "active";
+  const loadingConsultation = Boolean(consultationId) && consultation.isPending;
 
   return (
     <div className="space-y-6">
