@@ -14,13 +14,221 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      citations: {
+        Row: {
+          consultation_id: string
+          created_at: string
+          id: string
+          snippet: string | null
+          source_title: string
+          source_url: string | null
+        }
+        Insert: {
+          consultation_id: string
+          created_at?: string
+          id?: string
+          snippet?: string | null
+          source_title: string
+          source_url?: string | null
+        }
+        Update: {
+          consultation_id?: string
+          created_at?: string
+          id?: string
+          snippet?: string | null
+          source_title?: string
+          source_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "citations_consultation_id_fkey"
+            columns: ["consultation_id"]
+            isOneToOne: false
+            referencedRelation: "consultations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      consultation_summaries: {
+        Row: {
+          assessment: string | null
+          chief_complaint: string | null
+          consultation_id: string
+          created_at: string
+          id: string
+          objective: string | null
+          plan: string | null
+          subjective: string | null
+        }
+        Insert: {
+          assessment?: string | null
+          chief_complaint?: string | null
+          consultation_id: string
+          created_at?: string
+          id?: string
+          objective?: string | null
+          plan?: string | null
+          subjective?: string | null
+        }
+        Update: {
+          assessment?: string | null
+          chief_complaint?: string | null
+          consultation_id?: string
+          created_at?: string
+          id?: string
+          objective?: string | null
+          plan?: string | null
+          subjective?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consultation_summaries_consultation_id_fkey"
+            columns: ["consultation_id"]
+            isOneToOne: true
+            referencedRelation: "consultations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      consultations: {
+        Row: {
+          created_at: string
+          ended_at: string | null
+          id: string
+          started_at: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          started_at?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          started_at?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      medical_points: {
+        Row: {
+          category: string
+          confidence: number | null
+          consultation_id: string
+          content: string
+          created_at: string
+          id: string
+        }
+        Insert: {
+          category?: string
+          confidence?: number | null
+          consultation_id: string
+          content: string
+          created_at?: string
+          id?: string
+        }
+        Update: {
+          category?: string
+          confidence?: number | null
+          consultation_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "medical_points_consultation_id_fkey"
+            columns: ["consultation_id"]
+            isOneToOne: false
+            referencedRelation: "consultations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          consultation_id: string
+          content: string
+          id: string
+          role: string
+          timestamp: string
+        }
+        Insert: {
+          consultation_id: string
+          content: string
+          id?: string
+          role: string
+          timestamp?: string
+        }
+        Update: {
+          consultation_id?: string
+          content?: string
+          id?: string
+          role?: string
+          timestamp?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_consultation_id_fkey"
+            columns: ["consultation_id"]
+            isOneToOne: false
+            referencedRelation: "consultations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          role: string
+          specialty: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id: string
+          role?: string
+          specialty?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          role?: string
+          specialty?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      owns_consultation: {
+        Args: { _consultation_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
