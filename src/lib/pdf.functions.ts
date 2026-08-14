@@ -69,7 +69,7 @@ export const generateConsultationPdfUrl = createServerFn({ method: "POST" })
       endedAt: consultation.ended_at,
       profile: profile ?? null,
       summary: summary ?? null,
-      extraction: extraction as never,
+      extraction: extraction as ExtractionResult,
       points: points ?? [],
       transcript: transcript ?? [],
     });
