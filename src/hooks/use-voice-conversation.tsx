@@ -6,6 +6,7 @@ type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
+  maxAlternatives?: number;
   start: () => void;
   stop: () => void;
   abort: () => void;
@@ -19,6 +20,12 @@ function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   const w = window as any;
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
+
+/** How long the patient may pause mid-sentence before the turn is submitted. */
+const SILENCE_AFTER_SPEECH_MS = 2500;
+/** How long we keep the mic open when nothing has been said yet. */
+const SILENCE_BEFORE_SPEECH_MS = 10000;
+
 
 type Options = {
   /** Called with the final transcript once the patient stops speaking. */
