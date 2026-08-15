@@ -72,6 +72,8 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const lastSpeechAtRef = useRef(0);
   const speechDetectedRef = useRef(false);
   const generationRef = useRef(0);
+  const ringRef = useRef<Float32Array[]>([]);
+  const activeRef = useRef(false);
   onTranscriptRef.current = onTranscript; mutedRef.current = muted; autoRef.current = autoMode;
 
   const setVoiceState = useCallback((next: VoiceState) => { stateRef.current = next; setState(next); }, []);
@@ -79,13 +81,52 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
   const releaseCapture = useCallback(async () => {
     if (timerRef.current !== null) window.clearInterval(timerRef.current);
-    timerRef.current = null;
+    timerRef.current = null; activeRef.current = false; ringRef.current = [];
     processorRef.current?.disconnect(); sourceRef.current?.disconnect();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     processorRef.current = null; sourceRef.current = null; streamRef.current = null;
     const context = contextRef.current; contextRef.current = null;
     if (context && context.state !== "closed") await context.close().catch(() => undefined);
   }, []);
+
+  // Keeps the microphone graph warm between turns and continuously buffers a short
+  // pre-roll window so the first words are never clipped when a turn starts.
+  const ensureCapture = useCallback(async () => {
+    const live = streamRef.current?.getAudioTracks().some((track) => track.readyState === "live");
+    if (live && contextRef.current && contextRef.current.state !== "closed") {
+      await contextRef.current.resume().catch(() => undefined);
+      return;
+    }
+    await releaseCapture();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    const Ctor = audioContextConstructor(); if (!Ctor) { stream.getTracks().forEach((track) => track.stop()); throw new Error("Audio recording is unavailable."); }
+    const context = new Ctor(); await context.resume();
+    const source = context.createMediaStreamSource(stream); const processor = context.createScriptProcessor(2048, 1, 1);
+    streamRef.current = stream; contextRef.current = context; sourceRef.current = source; processorRef.current = processor;
+    sampleRateRef.current = context.sampleRate; ringRef.current = [];
+    processor.onaudioprocess = (event) => {
+      const samples = new Float32Array(event.inputBuffer.getChannelData(0));
+      if (activeRef.current) {
+        pcmRef.current.push(samples);
+        let energy = 0; for (let i = 0; i < samples.length; i += 1) energy += (samples[i] ?? 0) ** 2;
+        if (Math.sqrt(energy / Math.max(1, samples.length)) >= VOICE_CAPTURE_CONFIG.speechThreshold) {
+          speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now();
+          if (stateRef.current === "LISTENING") setVoiceState("RECORDING");
+        }
+        return;
+      }
+      // Never buffer while the AI Doctor is speaking, so its voice is not recorded.
+      if (stateRef.current === "SPEAKING" || stateRef.current === "ENDED") { ringRef.current = []; return; }
+      ringRef.current.push(samples);
+      const maxSamples = Math.round((sampleRateRef.current * VOICE_CAPTURE_CONFIG.prerollMs) / 1000);
+      let total = ringRef.current.reduce((sum, chunk) => sum + chunk.length, 0);
+      while (ringRef.current.length > 1 && total - (ringRef.current[0]?.length ?? 0) >= maxSamples) {
+        total -= ringRef.current.shift()?.length ?? 0;
+      }
+    };
+    source.connect(processor); processor.connect(context.destination);
+  }, [releaseCapture, setVoiceState]);
+
 
   const transcribe = useCallback(async (chunks: Float32Array[], sampleRate: number) => {
     const wav = encodeWav(chunks, sampleRate);
