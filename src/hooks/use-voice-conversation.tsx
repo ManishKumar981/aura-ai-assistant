@@ -274,6 +274,9 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const endSession = useCallback(() => {
     autoRef.current = false;
     setAutoMode(false);
+    manualStopRef.current = true;
+    submittedRef.current = true;
+    clearSilenceTimer();
     recognitionRef.current?.abort();
     recognitionRef.current = null;
     try {
@@ -282,7 +285,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
       /* noop */
     }
     setVoiceState("ENDED");
-  }, [setVoiceState]);
+  }, [clearSilenceTimer, setVoiceState]);
 
   const reset = useCallback(() => {
     setError(null);
@@ -292,6 +295,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
   useEffect(
     () => () => {
+      if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
       recognitionRef.current?.abort();
       try {
         window.speechSynthesis?.cancel();
@@ -301,6 +305,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
     },
     [],
   );
+
 
   return {
     supported,
