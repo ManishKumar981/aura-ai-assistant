@@ -65,7 +65,6 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const submittedRef = useRef(false);
   const manualStopRef = useRef(false);
   const restartAttemptsRef = useRef(0);
-  const startListeningRef = useRef<() => void>(() => {});
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current !== null) {
@@ -199,7 +198,6 @@ export function useVoiceConversation({ onTranscript }: Options) {
     }
   }, [clearSilenceTimer, setVoiceState, submitTurn]);
 
-  startListeningRef.current = startListening;
 
   /** Manual "I'm done talking" — send whatever has been captured. */
   const stopListening = useCallback(() => {
