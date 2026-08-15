@@ -40,11 +40,16 @@ export const sendPatientMessage = createServerFn({ method: "POST" })
       .limit(40);
     if (historyError) throw new Error(historyError.message);
 
-    const turns = (history ?? [])
-      .filter((m) => m.role === "PATIENT" || m.role === "AI_DOCTOR")
-      .map((m) => ({ role: m.role === "PATIENT" ? ("user" as const) : ("assistant" as const), content: m.content }));
+    const transcript = (history ?? []).filter((m) => m.role === "PATIENT" || m.role === "AI_DOCTOR");
+    const turns = transcript.map((m) => ({
+      role: m.role === "PATIENT" ? ("user" as const) : ("assistant" as const),
+      content: m.content,
+    }));
 
-    const { content, demo } = await generateDoctorReply(turns);
+    const { deriveConsultationState } = await import("./consultation-engine");
+    const state = deriveConsultationState(transcript);
+
+    const { content, demo } = await generateDoctorReply(turns, state);
 
     const { data: doctorMessage, error: replyError } = await supabase
       .from("messages")
@@ -58,8 +63,11 @@ export const sendPatientMessage = createServerFn({ method: "POST" })
       .update({ updated_at: new Date().toISOString() })
       .eq("id", data.consultationId);
 
-    return { patientMessage, doctorMessage, demo };
+    const nextState = deriveConsultationState([...transcript, { role: "AI_DOCTOR", content }]);
+
+    return { patientMessage, doctorMessage, demo, state: nextState };
   });
+
 
 export const getAiDoctorStatus = createServerFn({ method: "GET" }).handler(async () => {
   const { aiDoctorConfig } = await import("./ai-doctor.server");
