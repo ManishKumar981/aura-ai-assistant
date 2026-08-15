@@ -17,6 +17,7 @@ import { Route as AuthenticatedAssistantRouteImport } from './routes/_authentica
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
+import { Route as ApiVoiceTranscriptionRouteImport } from './routes/api/voice-transcription'
 import { Route as AuthenticatedConsultationIdRouteImport } from './routes/_authenticated/consultation.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -58,6 +59,11 @@ const AuthenticatedProfileRoute = AuthenticatedProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiVoiceTranscriptionRoute = ApiVoiceTranscriptionRouteImport.update({
+  id: '/api/voice-transcription',
+  path: '/api/voice-transcription',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedConsultationIdRoute =
   AuthenticatedConsultationIdRouteImport.update({
     id: '/consultation/$id',
@@ -73,6 +79,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/profile': typeof AuthenticatedProfileRoute
+  '/api/voice-transcription': typeof ApiVoiceTranscriptionRoute
   '/consultation/$id': typeof AuthenticatedConsultationIdRoute
 }
 export interface FileRoutesByTo {
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/profile': typeof AuthenticatedProfileRoute
+  '/api/voice-transcription': typeof ApiVoiceTranscriptionRoute
   '/consultation/$id': typeof AuthenticatedConsultationIdRoute
 }
 export interface FileRoutesById {
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
+  '/api/voice-transcription': typeof ApiVoiceTranscriptionRoute
   '/_authenticated/consultation/$id': typeof AuthenticatedConsultationIdRoute
 }
 export interface FileRouteTypes {
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/history'
     | '/profile'
+    | '/api/voice-transcription'
     | '/consultation/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/history'
     | '/profile'
+    | '/api/voice-transcription'
     | '/consultation/$id'
   id:
     | '__root__'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/history'
     | '/_authenticated/profile'
+    | '/api/voice-transcription'
     | '/_authenticated/consultation/$id'
   fileRoutesById: FileRoutesById
 }
@@ -136,6 +148,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  ApiVoiceTranscriptionRoute: typeof ApiVoiceTranscriptionRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -196,6 +209,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProfileRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/voice-transcription': {
+      id: '/api/voice-transcription'
+      path: '/api/voice-transcription'
+      fullPath: '/api/voice-transcription'
+      preLoaderRoute: typeof ApiVoiceTranscriptionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/consultation/$id': {
       id: '/_authenticated/consultation/$id'
       path: '/consultation/$id'
@@ -230,6 +250,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  ApiVoiceTranscriptionRoute: ApiVoiceTranscriptionRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
