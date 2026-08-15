@@ -181,6 +181,67 @@ function AssistantPage() {
         </p>
       </div>
 
+      {!disabled && (messages.data?.length ?? 0) > 0 && (
+        <section className="clinical-panel space-y-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold">Structured history progress</h2>
+              <p className="text-xs text-muted-foreground">
+                Current stage: <span className="font-medium text-foreground">{engine.stageLabel}</span>
+                {engine.nextQuestion && !ended ? ` · Next: ${engine.nextQuestion}` : ""}
+              </p>
+            </div>
+            <Badge variant="secondary">{engine.completeness}% captured</Badge>
+          </div>
+
+          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${engine.completeness}%` }} />
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {CONSULTATION_STAGES.filter((s) => s !== "COMPLETE").map((s, i) => (
+              <Badge key={s} variant={i < activeStageIndex ? "secondary" : i === activeStageIndex ? "default" : "outline"}>
+                {STAGE_LABELS[s]}
+              </Badge>
+            ))}
+          </div>
+
+          <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+            {engine.slots.map((slot) => (
+              <li key={slot.id} className="flex items-center gap-2 text-xs">
+                <span
+                  aria-hidden
+                  className={`size-2 shrink-0 rounded-full ${slot.filled ? "bg-primary" : "bg-muted-foreground/40"}`}
+                />
+                <span className={slot.filled ? "text-foreground" : "text-muted-foreground"}>{slot.label}</span>
+                <span className="sr-only">{slot.filled ? "covered" : "not yet covered"}</span>
+              </li>
+            ))}
+          </ul>
+
+          {engine.redFlags.length > 0 && (
+            <div
+              className={`flex items-start gap-2 rounded-md border p-3 text-xs ${
+                engine.emergency
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-border bg-muted/60 text-muted-foreground"
+              }`}
+            >
+              <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+              <p>
+                <span className="font-medium">
+                  {engine.emergency ? "Possible emergency red flags mentioned: " : "Red flags mentioned: "}
+                </span>
+                {engine.redFlags.join(", ")}.{" "}
+                {engine.emergency ? "Seek urgent in-person or emergency care — this is not a diagnosis." : "A clinician should review these."}
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
+
+
       <section className="clinical-panel flex min-h-[28rem] flex-col">
         <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-6">
           {!disabled && messages.data?.length === 0 && (
