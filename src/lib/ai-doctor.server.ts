@@ -8,7 +8,10 @@
  * responder is used so the UI can be exercised without an API key.
  */
 
+import { stateGuidance, type ConsultationState } from "./consultation-engine";
+
 export type ChatTurn = { role: "user" | "assistant"; content: string };
+
 
 export const AI_DOCTOR_SYSTEM_PROMPT = `You are "AI Doctor", a cautious medical information assistant used inside a clinical documentation tool.
 
