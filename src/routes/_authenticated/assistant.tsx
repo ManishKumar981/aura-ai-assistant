@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { sendPatientMessage, getAiDoctorStatus } from "@/lib/ai-doctor.functions";
 import { finalizeConsultation } from "@/lib/consultation.functions";
 import { useVoiceConversation, type VoiceState } from "@/hooks/use-voice-conversation";
+import { deriveConsultationState, STAGE_LABELS, CONSULTATION_STAGES } from "@/lib/consultation-engine";
+
 
 type AssistantSearch = { consultation?: string };
 
