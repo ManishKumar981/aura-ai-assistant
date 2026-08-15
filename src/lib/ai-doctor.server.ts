@@ -34,11 +34,20 @@ const DEMO_SEQUENCE = [
   "Based on what you've described, several common causes could fit, but I can't be certain without an examination and possibly tests — so please treat this as information rather than a diagnosis. A clinician should review your symptoms, and you should seek care sooner if anything worsens. Is there anything else you'd like to add before we wrap up?",
 ];
 
-export function demoReply(history: ChatTurn[]): string {
+export function demoReply(history: ChatTurn[], state?: ConsultationState): string {
+  if (state) {
+    const ack = "Thanks — I've noted that.";
+    if (state.emergency) {
+      return `${ack} What you've described could be serious, so please seek urgent in-person or emergency care now. I'm an AI assistant, not a licensed doctor, and I can't diagnose you. ${state.nextQuestion ?? "Is anyone with you who can help you get seen quickly?"}`;
+    }
+    if (state.nextQuestion) return `${ack} ${state.nextQuestion}`;
+    return "Thank you — that gives me a clear picture. To recap what you told me, I've captured your main concern, how long it has lasted, how severe it is, the warning signs we checked, and your background history. I can't give a diagnosis, so a qualified clinician should review this. Please seek care sooner if anything worsens. You can end the consultation whenever you're ready.";
+  }
   const patientTurns = history.filter((t) => t.role === "user").length;
   const idx = Math.min(Math.max(patientTurns - 1, 0), DEMO_SEQUENCE.length - 1);
   return DEMO_SEQUENCE[idx]!;
 }
+
 
 export function aiDoctorConfig() {
   const apiKey = process.env["AI_DOCTOR_API_KEY"] ?? process.env["LOVABLE_API_KEY"];
