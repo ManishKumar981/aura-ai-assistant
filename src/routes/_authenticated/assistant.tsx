@@ -149,6 +149,11 @@ function AssistantPage() {
   const ended = Boolean(consultation.data) && consultation.data?.status !== "active";
   const loadingConsultation = Boolean(consultationId) && consultation.isPending;
 
+  const engine = deriveConsultationState(messages.data ?? []);
+  const activeStageIndex = CONSULTATION_STAGES.indexOf(engine.stage);
+
+
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
