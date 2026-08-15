@@ -61,9 +61,16 @@ export function aiDoctorConfig() {
   return { apiKey, baseUrl, model, demo };
 }
 
-export async function generateDoctorReply(history: ChatTurn[]): Promise<{ content: string; demo: boolean }> {
+export async function generateDoctorReply(
+  history: ChatTurn[],
+  state?: ConsultationState,
+): Promise<{ content: string; demo: boolean }> {
   const { apiKey, baseUrl, model, demo } = aiDoctorConfig();
-  if (demo) return { content: demoReply(history), demo: true };
+  if (demo) return { content: demoReply(history, state), demo: true };
+
+  const systemContent = state
+    ? `${AI_DOCTOR_SYSTEM_PROMPT}\n\n${stateGuidance(state)}`
+    : AI_DOCTOR_SYSTEM_PROMPT;
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -74,9 +81,10 @@ export async function generateDoctorReply(history: ChatTurn[]): Promise<{ conten
     },
     body: JSON.stringify({
       model,
-      messages: [{ role: "system", content: AI_DOCTOR_SYSTEM_PROMPT }, ...history],
+      messages: [{ role: "system", content: systemContent }, ...history],
     }),
   });
+
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
