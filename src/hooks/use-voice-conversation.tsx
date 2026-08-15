@@ -216,6 +216,21 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState]);
   const reset = useCallback(() => { setError(null); setTranscript(""); setVoiceState("IDLE"); }, [setVoiceState]);
 
+  // Warm the microphone ahead of the first turn when permission was already granted,
+  // so the pre-roll buffer is filled before the patient starts speaking.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!canRecordAudio()) return;
+      const granted = await navigator.permissions?.query({ name: "microphone" as PermissionName }).then((s) => s.state === "granted").catch(() => false);
+      if (!granted || cancelled || stateRef.current !== "IDLE" || streamRef.current) return;
+      await ensureCapture().catch(() => undefined);
+    })();
+    return () => { cancelled = true; };
+  }, [ensureCapture]);
+
+
+
   useEffect(() => () => { generationRef.current += 1; if (timerRef.current !== null) window.clearInterval(timerRef.current); processorRef.current?.disconnect(); sourceRef.current?.disconnect(); streamRef.current?.getTracks().forEach((track) => track.stop()); void contextRef.current?.close(); window.speechSynthesis?.cancel(); }, []);
 
   return { supported, speechSupported, state, transcript, error, muted, setMuted, autoMode, setAutoMode, startListening, stopListening, cancelListening, stopSpeaking, speak, setVoiceState, endSession, reset };
