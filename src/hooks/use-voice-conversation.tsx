@@ -206,7 +206,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
 
   const stopListening = useCallback(() => { void finishCapture(); }, [finishCapture]);
-  const cancelListening = useCallback(() => { generationRef.current += 1; pcmRef.current = []; speechDetectedRef.current = false; void releaseCapture(); setVoiceState("IDLE"); }, [releaseCapture, setVoiceState]);
+  const cancelListening = useCallback(() => { generationRef.current += 1; pcmRef.current = []; speechDetectedRef.current = false; endTurn(); setVoiceState("IDLE"); }, [endTurn, setVoiceState]);
   const stopSpeaking = useCallback(() => { window.speechSynthesis?.cancel(); if (stateRef.current === "SPEAKING") setVoiceState("IDLE"); }, [setVoiceState]);
   const speak = useCallback((text: string) => {
     const finish = () => { if (stateRef.current === "ENDED") return; setVoiceState("IDLE"); if (autoRef.current && canRecordAudio()) window.setTimeout(() => { if (stateRef.current === "IDLE" && autoRef.current) void startListening(); }, 350); };
