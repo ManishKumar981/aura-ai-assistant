@@ -6,6 +6,7 @@ type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
+  maxAlternatives?: number;
   start: () => void;
   stop: () => void;
   abort: () => void;
@@ -19,6 +20,12 @@ function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   const w = window as any;
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
+
+/** How long the patient may pause mid-sentence before the turn is submitted. */
+const SILENCE_AFTER_SPEECH_MS = 2500;
+/** How long we keep the mic open when nothing has been said yet. */
+const SILENCE_BEFORE_SPEECH_MS = 10000;
+
 
 type Options = {
   /** Called with the final transcript once the patient stops speaking. */
@@ -54,6 +61,37 @@ export function useVoiceConversation({ onTranscript }: Options) {
     setSpeechSupported(typeof window !== "undefined" && "speechSynthesis" in window);
   }, []);
 
+  const silenceTimerRef = useRef<number | null>(null);
+  const submittedRef = useRef(false);
+  const manualStopRef = useRef(false);
+  const restartAttemptsRef = useRef(0);
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  /** Submit the collected speech exactly once per listening turn. */
+  const submitTurn = useCallback(() => {
+    if (submittedRef.current) return;
+    const text = (finalRef.current || "").trim();
+    if (!text) return;
+    submittedRef.current = true;
+    clearSilenceTimer();
+    manualStopRef.current = true;
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    try {
+      recognition?.stop();
+    } catch {
+      /* noop */
+    }
+    setVoiceState("PROCESSING");
+    onTranscriptRef.current(text);
+  }, [clearSilenceTimer, setVoiceState]);
+
   const startListening = useCallback(() => {
     const Ctor = getRecognitionCtor();
     if (!Ctor) {
@@ -69,26 +107,54 @@ export function useVoiceConversation({ onTranscript }: Options) {
     }
     const recognition = new Ctor();
     recognition.lang = "en-US";
-    recognition.continuous = false;
+    // Continuous keeps the mic open through natural pauses; we decide when the
+    // patient has finished with our own silence timer instead of letting the
+    // browser cut the turn off after the first short gap.
+    recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
     finalRef.current = "";
+    submittedRef.current = false;
+    manualStopRef.current = false;
+    restartAttemptsRef.current = 0;
     setTranscript("");
     setError(null);
+
+    const armSilenceTimer = () => {
+      clearSilenceTimer();
+      const delay = finalRef.current.trim() ? SILENCE_AFTER_SPEECH_MS : SILENCE_BEFORE_SPEECH_MS;
+      silenceTimerRef.current = window.setTimeout(() => {
+        if (stateRef.current !== "LISTENING") return;
+        if (finalRef.current.trim()) submitTurn();
+        else {
+          manualStopRef.current = true;
+          const active = recognitionRef.current;
+          recognitionRef.current = null;
+          try {
+            active?.stop();
+          } catch {
+            /* noop */
+          }
+          setVoiceState("IDLE");
+        }
+      }, delay);
+    };
 
     recognition.onresult = (event: any) => {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
-        if (result.isFinal) finalRef.current += result[0].transcript;
+        if (result.isFinal) finalRef.current += `${result[0].transcript} `;
         else interim += result[0].transcript;
       }
-      setTranscript((finalRef.current + interim).trim());
+      setTranscript((finalRef.current + interim).replace(/\s+/g, " ").trim());
+      armSilenceTimer();
     };
     recognition.onerror = (event: any) => {
       const code = event?.error;
-      if (code === "aborted" || code === "no-speech") {
-        return;
-      }
+      // These are normal during pauses or flaky network — onend restarts the mic.
+      if (code === "aborted" || code === "no-speech" || code === "network") return;
+      clearSilenceTimer();
       setError(
         code === "not-allowed" || code === "service-not-allowed"
           ? "Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below."
@@ -97,37 +163,67 @@ export function useVoiceConversation({ onTranscript }: Options) {
       setVoiceState("ERROR");
     };
     recognition.onend = () => {
-      recognitionRef.current = null;
-      const text = finalRef.current.trim();
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
       if (stateRef.current !== "LISTENING") return;
-      if (text) {
-        setVoiceState("PROCESSING");
-        onTranscriptRef.current(text);
-      } else {
-        setVoiceState("IDLE");
+      if (manualStopRef.current) {
+        if (finalRef.current.trim()) submitTurn();
+        else setVoiceState("IDLE");
+        return;
       }
+      // The engine ended the session on its own (short pause or transient
+      // network hiccup). Keep the turn alive by restarting the recognizer.
+      if (restartAttemptsRef.current < 12) {
+        restartAttemptsRef.current += 1;
+        try {
+          recognition.start();
+          recognitionRef.current = recognition;
+          armSilenceTimer();
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      if (finalRef.current.trim()) submitTurn();
+      else setVoiceState("IDLE");
     };
 
     recognitionRef.current = recognition;
     setVoiceState("LISTENING");
     try {
       recognition.start();
+      armSilenceTimer();
     } catch {
       setError("Could not start the microphone.");
       setVoiceState("ERROR");
     }
-  }, [setVoiceState]);
+  }, [clearSilenceTimer, setVoiceState, submitTurn]);
 
+
+  /** Manual "I'm done talking" — send whatever has been captured. */
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-  }, []);
+    manualStopRef.current = true;
+    clearSilenceTimer();
+    if (finalRef.current.trim()) {
+      submitTurn();
+      return;
+    }
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* noop */
+    }
+  }, [clearSilenceTimer, submitTurn]);
 
   const cancelListening = useCallback(() => {
+    manualStopRef.current = true;
+    submittedRef.current = true;
+    clearSilenceTimer();
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     setVoiceState("IDLE");
     recognition?.abort();
-  }, [setVoiceState]);
+  }, [clearSilenceTimer, setVoiceState]);
+
 
   const stopSpeaking = useCallback(() => {
     try {
@@ -176,6 +272,9 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const endSession = useCallback(() => {
     autoRef.current = false;
     setAutoMode(false);
+    manualStopRef.current = true;
+    submittedRef.current = true;
+    clearSilenceTimer();
     recognitionRef.current?.abort();
     recognitionRef.current = null;
     try {
@@ -184,7 +283,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
       /* noop */
     }
     setVoiceState("ENDED");
-  }, [setVoiceState]);
+  }, [clearSilenceTimer, setVoiceState]);
 
   const reset = useCallback(() => {
     setError(null);
@@ -194,6 +293,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
   useEffect(
     () => () => {
+      if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
       recognitionRef.current?.abort();
       try {
         window.speechSynthesis?.cancel();
@@ -203,6 +303,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
     },
     [],
   );
+
 
   return {
     supported,

@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib/dist/pdf-lib.esm.js";
 import { CATEGORY_LABELS, type ExtractionResult } from "./consultation-extraction";
 
 type Profile = {
@@ -306,4 +306,4 @@ function wrapText(text: string, maxWidth: number, font: PDFFont, fontSize: numbe
 }
 
 // Type-only helper import for PDFFont
-import type { PDFFont } from "pdf-lib";
+import type { PDFFont } from "pdf-lib/dist/pdf-lib.esm.js";

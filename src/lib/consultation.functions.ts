@@ -133,50 +133,58 @@ export const finalizeConsultation = createServerFn({ method: "POST" })
       .upsert(summaryRow, { onConflict: "consultation_id" });
     if (summaryError) throw new Error(summaryError.message);
 
-    // Generate and store the PDF report.
-    const { generateAndUploadPdf } = await import("./pdf.server");
+    // Generate and store the PDF report. A PDF failure must never block ending
+    // the consultation — the summary and points are already saved.
+    let pdfUrl: string | null = null;
+    try {
+      const { generateAndUploadPdf } = await import("./pdf.server");
 
-    const { data: consultationDetails, error: detailsError } = await supabase
-      .from("consultations")
-      .select("id, title, started_at, ended_at")
-      .eq("id", data.consultationId)
-      .maybeSingle();
-    if (detailsError) throw new Error(detailsError.message);
-    if (!consultationDetails) throw new Error("Consultation not found after update.");
-    if (!consultationDetails.ended_at) {
-      throw new Error("Consultation end time is missing after completion.");
+      const { data: consultationDetails, error: detailsError } = await supabase
+        .from("consultations")
+        .select("id, title, started_at, ended_at")
+        .eq("id", data.consultationId)
+        .maybeSingle();
+      if (detailsError) throw new Error(detailsError.message);
+      if (!consultationDetails) throw new Error("Consultation not found after update.");
+      if (!consultationDetails.ended_at) {
+        throw new Error("Consultation end time is missing after completion.");
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", userId)
+        .maybeSingle();
+      if (profileError) throw new Error(profileError.message);
+
+      const { data: citations } = await supabase
+        .from("citations")
+        .select("source_title, source_url, snippet")
+        .eq("consultation_id", data.consultationId)
+        .order("created_at", { ascending: true });
+
+      pdfUrl = await generateAndUploadPdf(
+        supabase,
+        userId,
+        consultationDetails,
+        profile ?? null,
+        summaryRow,
+        rows,
+        turns,
+        citations ?? [],
+      );
+
+      const { error: pdfUpdateError } = await supabase
+        .from("consultations")
+        .update({ pdf_url: pdfUrl })
+        .eq("id", data.consultationId);
+      if (pdfUpdateError) throw new Error(pdfUpdateError.message);
+    } catch (pdfError) {
+      console.error("PDF generation failed for consultation", data.consultationId, pdfError);
+      pdfUrl = null;
     }
-
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("full_name, email")
-      .eq("id", userId)
-      .maybeSingle();
-    if (profileError) throw new Error(profileError.message);
-
-    const { data: citations } = await supabase
-      .from("citations")
-      .select("source_title, source_url, snippet")
-      .eq("consultation_id", data.consultationId)
-      .order("created_at", { ascending: true });
-
-    const pdfUrl = await generateAndUploadPdf(
-      supabase,
-      userId,
-      consultationDetails,
-      profile ?? null,
-      summaryRow,
-      rows,
-      turns,
-      citations ?? [],
-    );
-
-    const { error: pdfUpdateError } = await supabase
-      .from("consultations")
-      .update({ pdf_url: pdfUrl })
-      .eq("id", data.consultationId);
-    if (pdfUpdateError) throw new Error(pdfUpdateError.message);
 
     return { consultationId: data.consultationId, turns: turns.length, points: rows.length, generatedBy, pdfUrl };
   });
+
 
