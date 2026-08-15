@@ -18,6 +18,7 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedConsultationIdRouteImport } from './routes/_authenticated/consultation.$id'
+import { Route as ApiPublicPdfcheckRouteImport } from './routes/api/public/pdfcheck'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -64,6 +65,11 @@ const AuthenticatedConsultationIdRoute =
     path: '/consultation/$id',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiPublicPdfcheckRoute = ApiPublicPdfcheckRouteImport.update({
+  id: '/api/public/pdfcheck',
+  path: '/api/public/pdfcheck',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -74,6 +80,7 @@ export interface FileRoutesByFullPath {
   '/history': typeof AuthenticatedHistoryRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/consultation/$id': typeof AuthenticatedConsultationIdRoute
+  '/api/public/pdfcheck': typeof ApiPublicPdfcheckRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -84,6 +91,7 @@ export interface FileRoutesByTo {
   '/history': typeof AuthenticatedHistoryRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/consultation/$id': typeof AuthenticatedConsultationIdRoute
+  '/api/public/pdfcheck': typeof ApiPublicPdfcheckRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -96,6 +104,7 @@ export interface FileRoutesById {
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/consultation/$id': typeof AuthenticatedConsultationIdRoute
+  '/api/public/pdfcheck': typeof ApiPublicPdfcheckRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/profile'
     | '/consultation/$id'
+    | '/api/public/pdfcheck'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/profile'
     | '/consultation/$id'
+    | '/api/public/pdfcheck'
   id:
     | '__root__'
     | '/'
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/_authenticated/history'
     | '/_authenticated/profile'
     | '/_authenticated/consultation/$id'
+    | '/api/public/pdfcheck'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -136,6 +148,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  ApiPublicPdfcheckRoute: typeof ApiPublicPdfcheckRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -203,6 +216,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedConsultationIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/pdfcheck': {
+      id: '/api/public/pdfcheck'
+      path: '/api/public/pdfcheck'
+      fullPath: '/api/public/pdfcheck'
+      preLoaderRoute: typeof ApiPublicPdfcheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -230,6 +250,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  ApiPublicPdfcheckRoute: ApiPublicPdfcheckRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
