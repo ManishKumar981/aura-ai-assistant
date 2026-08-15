@@ -160,15 +160,21 @@ export function useVoiceConversation({ onTranscript }: Options) {
     setTranscript(text); setVoiceState("PROCESSING"); onTranscriptRef.current(text);
   }, [setVoiceState]);
 
+  const endTurn = useCallback(() => {
+    activeRef.current = false; ringRef.current = [];
+    if (timerRef.current !== null) window.clearInterval(timerRef.current);
+    timerRef.current = null;
+  }, []);
+
   const finishCapture = useCallback(async () => {
     if (stateRef.current !== "LISTENING" && stateRef.current !== "RECORDING") return;
     generationRef.current += 1;
     const chunks = pcmRef.current; const sampleRate = sampleRateRef.current; const hasSpeech = speechDetectedRef.current;
-    pcmRef.current = []; await releaseCapture();
+    pcmRef.current = []; endTurn();
     if (!hasSpeech) { setVoiceState("IDLE"); return; }
     try { await transcribe(chunks, sampleRate); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not transcribe the recording."); setVoiceState("ERROR"); }
-  }, [releaseCapture, setVoiceState, transcribe]);
+  }, [endTurn, setVoiceState, transcribe]);
 
   const startListening = useCallback(async () => {
     if (!canRecordAudio()) { setError("Microphone recording is not available in this browser. Use the text box instead."); setVoiceState("ERROR"); return; }
@@ -176,23 +182,14 @@ export function useVoiceConversation({ onTranscript }: Options) {
     const generation = generationRef.current + 1; generationRef.current = generation;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      if (generationRef.current !== generation) { stream.getTracks().forEach((track) => track.stop()); return; }
-      const Ctor = audioContextConstructor(); if (!Ctor) throw new Error("Audio recording is unavailable.");
-      const context = new Ctor(); await context.resume();
-      const source = context.createMediaStreamSource(stream); const processor = context.createScriptProcessor(2048, 1, 1);
-      streamRef.current = stream; contextRef.current = context; sourceRef.current = source; processorRef.current = processor;
-      sampleRateRef.current = context.sampleRate; pcmRef.current = []; speechDetectedRef.current = false;
+      await ensureCapture();
+      if (generationRef.current !== generation) return;
+      // Seed the turn with the buffered pre-roll audio so the first words are kept.
+      pcmRef.current = ringRef.current.slice(); ringRef.current = [];
+      speechDetectedRef.current = false;
       startedAtRef.current = performance.now(); lastSpeechAtRef.current = startedAtRef.current;
-      processor.onaudioprocess = (event) => {
-        const samples = new Float32Array(event.inputBuffer.getChannelData(0)); pcmRef.current.push(samples);
-        let energy = 0; for (let i = 0; i < samples.length; i += 1) energy += (samples[i] ?? 0) ** 2;
-        if (Math.sqrt(energy / Math.max(1, samples.length)) >= VOICE_CAPTURE_CONFIG.speechThreshold) {
-          speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now();
-          if (stateRef.current === "LISTENING") setVoiceState("RECORDING");
-        }
-      };
-      source.connect(processor); processor.connect(context.destination);
+      activeRef.current = true;
+      if (timerRef.current !== null) window.clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
         const now = performance.now(); const elapsed = now - startedAtRef.current;
         if (!speechDetectedRef.current && elapsed >= VOICE_CAPTURE_CONFIG.silenceBeforeSpeechMs) void finishCapture();
@@ -205,7 +202,8 @@ export function useVoiceConversation({ onTranscript }: Options) {
         : cause instanceof Error ? cause.message : "Could not start the microphone.");
       setVoiceState("ERROR");
     }
-  }, [finishCapture, releaseCapture, setVoiceState]);
+  }, [ensureCapture, finishCapture, releaseCapture, setVoiceState]);
+
 
   const stopListening = useCallback(() => { void finishCapture(); }, [finishCapture]);
   const cancelListening = useCallback(() => { generationRef.current += 1; pcmRef.current = []; speechDetectedRef.current = false; void releaseCapture(); setVoiceState("IDLE"); }, [releaseCapture, setVoiceState]);
