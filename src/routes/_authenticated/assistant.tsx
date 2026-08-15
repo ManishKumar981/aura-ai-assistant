@@ -32,7 +32,9 @@ export const Route = createFileRoute("/_authenticated/assistant")({
 
 const VOICE_STATE_META: Record<VoiceState, { label: string; hint: string; tone: string }> = {
   IDLE: { label: "Idle", hint: "Tap the microphone to speak.", tone: "bg-muted text-muted-foreground" },
-  LISTENING: { label: "Listening", hint: "Listening — speak now, then pause.", tone: "bg-primary text-primary-foreground" },
+  LISTENING: { label: "Listening", hint: "Microphone is starting — speak when ready.", tone: "bg-primary text-primary-foreground" },
+  RECORDING: { label: "Recording", hint: "Capturing your full sentence — pause when finished.", tone: "bg-primary text-primary-foreground" },
+  TRANSCRIBING: { label: "Transcribing", hint: "Converting the complete recording to text…", tone: "bg-secondary text-secondary-foreground" },
   PROCESSING: { label: "Processing", hint: "Sending your words to the AI Doctor…", tone: "bg-secondary text-secondary-foreground" },
   SPEAKING: { label: "Speaking", hint: "AI Doctor is speaking.", tone: "bg-accent text-accent-foreground" },
   ENDED: { label: "Ended", hint: "Voice session ended.", tone: "bg-muted text-muted-foreground" },
@@ -297,7 +299,7 @@ function AssistantPage() {
             <span className="text-xs text-muted-foreground">{VOICE_STATE_META[voice.state].hint}</span>
             {!voice.supported && (
               <span className="text-xs text-muted-foreground">
-                Speech recognition unavailable in this browser — text input is used instead.
+                Microphone recording unavailable in this browser — text input is used instead.
               </span>
             )}
           </div>
@@ -314,13 +316,13 @@ function AssistantPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
-              variant={voice.state === "LISTENING" ? "default" : "outline"}
+              variant={voice.state === "LISTENING" || voice.state === "RECORDING" ? "default" : "outline"}
               size="icon"
-              title={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
-              aria-label={voice.state === "LISTENING" ? "Stop listening" : "Start speaking"}
+              title={voice.state === "LISTENING" || voice.state === "RECORDING" ? "Stop listening" : "Start speaking"}
+              aria-label={voice.state === "LISTENING" || voice.state === "RECORDING" ? "Stop listening" : "Start speaking"}
               disabled={disabled || ended || pending || loadingConsultation || !voice.supported}
               onClick={() => {
-                if (voice.state === "LISTENING") {
+                if (voice.state === "LISTENING" || voice.state === "RECORDING") {
                   voice.stopListening();
                 } else {
                   voice.reset();
@@ -329,7 +331,7 @@ function AssistantPage() {
                 }
               }}
             >
-              {voice.state === "LISTENING" ? <MicOff className="size-4" /> : <Mic className="size-4" />}
+              {voice.state === "LISTENING" || voice.state === "RECORDING" ? <MicOff className="size-4" /> : <Mic className="size-4" />}
             </Button>
 
             <Button
@@ -352,7 +354,7 @@ function AssistantPage() {
                 voice.stopSpeaking();
                 voice.cancelListening();
               }}
-              disabled={voice.state !== "SPEAKING" && voice.state !== "LISTENING"}
+              disabled={voice.state !== "SPEAKING" && voice.state !== "LISTENING" && voice.state !== "RECORDING"}
             >
               Stop speaking
             </Button>
