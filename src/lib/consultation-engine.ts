@@ -79,7 +79,7 @@ const SLOTS: SlotDef[] = [
     stage: "SYMPTOM_DETAIL",
     question: "How long has this been going on?",
     patient: [
-      /\b(?:for|since|about|around|past|last)?\s*(?:\d+|a|an|couple of|few|several)\s*(?:minute|hour|day|week|month|year)s?\b/i,
+      /\b(?:for|since|about|around|past|last)?\s*(?:\d+|a|an|couple of|few|several|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?:minute|hour|day|week|month|year)s?\b/i,
       /\b(today|yesterday|this morning|last night|since (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i,
     ],
   },
