@@ -8,7 +8,9 @@ export const VOICE_CAPTURE_CONFIG = {
   silenceAfterSpeechMs: 1800,
   silenceBeforeSpeechMs: 10000,
   speechThreshold: 0.012,
+  prerollMs: 800,
 } as const;
+
 
 type Options = { onTranscript: (text: string) => void };
 
