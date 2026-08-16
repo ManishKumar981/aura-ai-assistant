@@ -70,7 +70,7 @@ export const sendPatientMessage = createServerFn({ method: "POST" })
 
 
 export const getAiDoctorStatus = createServerFn({ method: "GET" }).handler(async () => {
-  const { aiDoctorConfig } = await import("./ai-doctor.server");
-  const { demo, model } = aiDoctorConfig();
-  return { demo, model: demo ? "demo" : model };
+  const { getAIProvider } = await import("./providers/index.server");
+  const provider = getAIProvider();
+  return { demo: provider.isDemo, model: provider.model };
 });
