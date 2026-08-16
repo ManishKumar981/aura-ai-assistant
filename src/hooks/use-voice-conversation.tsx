@@ -349,7 +349,8 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
 
 
-  useEffect(() => () => { generationRef.current += 1; if (timerRef.current !== null) window.clearInterval(timerRef.current); processorRef.current?.disconnect(); sourceRef.current?.disconnect(); streamRef.current?.getTracks().forEach((track) => track.stop()); void contextRef.current?.close(); window.speechSynthesis?.cancel(); }, []);
+  useEffect(() => () => { generationRef.current += 1; if (timerRef.current !== null) window.clearInterval(timerRef.current); const recognition = recognitionRef.current; recognitionRef.current = null; if (recognition) { recognition.onresult = null; recognition.onerror = null; recognition.onend = null; try { recognition.abort(); } catch { /* already stopped */ } } processorRef.current?.disconnect(); sourceRef.current?.disconnect(); streamRef.current?.getTracks().forEach((track) => track.stop()); void contextRef.current?.close(); window.speechSynthesis?.cancel(); }, []);
 
-  return { supported, speechSupported, state, transcript, error, muted, setMuted, autoMode, setAutoMode, startListening, stopListening, cancelListening, stopSpeaking, speak, setVoiceState, endSession, reset };
+  return { supported, speechSupported, sttMode, state, transcript, error, muted, setMuted, autoMode, setAutoMode, startListening, stopListening, cancelListening, stopSpeaking, speak, setVoiceState, endSession, reset };
+
 }
