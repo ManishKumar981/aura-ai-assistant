@@ -4,7 +4,7 @@
  * the AI Doctor; falls back to a deterministic, strictly literal extractor when
  * no provider key is configured (demo mode).
  */
-import { aiDoctorConfig } from "./ai-doctor.server";
+import { getAIProvider } from "./providers/index.server";
 import { EMPTY_EXTRACTION, RISK_LEVELS, deriveRiskLevel, type ExtractionResult, type RiskLevel } from "./consultation-extraction";
 
 export type TranscriptTurn = { role: string; content: string; timestamp: string };
@@ -262,29 +262,15 @@ export async function analyseTranscript(
     return { extraction: { ...EMPTY_EXTRACTION, summary: "No conversation was recorded." }, generatedBy: "empty" };
   }
 
-  const { apiKey, baseUrl, model, demo } = aiDoctorConfig();
-  if (demo) return { extraction: withRisk(literalExtraction(relevant)), generatedBy: "rules" };
+  const provider = getAIProvider();
+  if (provider.isDemo) return { extraction: withRisk(literalExtraction(relevant)), generatedBy: "rules" };
 
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": apiKey!,
-        Authorization: `Bearer ${apiKey!}`,
-      },
-      body: JSON.stringify({
-        model,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
-          { role: "user", content: `TRANSCRIPT:\n${transcriptToText(relevant)}` },
-        ],
-      }),
+    const { content, model } = await provider.generateResponse({
+      system: EXTRACTION_SYSTEM_PROMPT,
+      json: true,
+      messages: [{ role: "user", content: `TRANSCRIPT:\n${transcriptToText(relevant)}` }],
     });
-    if (!res.ok) throw new Error(`provider ${res.status}`);
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = json.choices?.[0]?.message?.content ?? "";
     const parsed = parseJsonBlock(content);
     if (!parsed) throw new Error("unparsable extraction");
     const extraction = normaliseExtraction(parsed);
