@@ -214,11 +214,82 @@ export function useVoiceConversation({ onTranscript }: Options) {
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not transcribe the recording."); setVoiceState("ERROR"); }
   }, [endTurn, setVoiceState, transcribe]);
 
+  // ---- Browser-native SpeechRecognition path (preferred when available) ----
+  const stopRecognition = useCallback((abort: boolean) => {
+    const recognition = recognitionRef.current;
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    if (!recognition) return;
+    if (abort) { recognitionRef.current = null; recognition.onresult = null; recognition.onerror = null; recognition.onend = null; try { recognition.abort(); } catch { /* already stopped */ } }
+    else { try { recognition.stop(); } catch { /* already stopped */ } }
+  }, []);
+
+  const finalizeRecognitionTurn = useCallback(() => {
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    recognitionRef.current = null;
+    if (submittedRef.current) return; // guards against duplicate patient messages
+    submittedRef.current = true;
+    const text = finalTextRef.current.trim();
+    if (!text) { if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") setVoiceState("IDLE"); return; }
+    setTranscript(text); setVoiceState("PROCESSING"); onTranscriptRef.current(text);
+  }, [setVoiceState]);
+
+  const startBrowserListening = useCallback(() => {
+    const Ctor = speechRecognitionConstructor();
+    if (!Ctor) return false;
+    const generation = generationRef.current + 1; generationRef.current = generation;
+    const recognition = new Ctor();
+    recognition.continuous = true; recognition.interimResults = true; recognition.lang = "en-US"; recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+    finalTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false;
+    startedAtRef.current = performance.now(); lastSpeechAtRef.current = startedAtRef.current;
+    setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
+
+    recognition.onresult = (event) => {
+      if (generationRef.current !== generation) return;
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i]; if (!result) continue;
+        const text = result[0]?.transcript ?? "";
+        if (result.isFinal) finalTextRef.current = `${finalTextRef.current} ${text}`.trim();
+        else interim += text;
+      }
+      if (finalTextRef.current || interim.trim()) { speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now(); }
+      if (stateRef.current === "LISTENING" && speechDetectedRef.current) setVoiceState("RECORDING");
+      setTranscript(`${finalTextRef.current} ${interim}`.trim());
+    };
+    recognition.onerror = (event) => {
+      if (generationRef.current !== generation) return;
+      const code = event.error ?? "";
+      if (code === "no-speech" || code === "aborted") return; // onend handles the turn
+      submittedRef.current = true;
+      stopRecognition(true);
+      setError(code === "not-allowed" || code === "service-not-allowed"
+        ? "Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below."
+        : code === "network"
+          ? "Speech recognition lost its network connection. Please try again or type your message."
+          : "Speech recognition failed. Please try again or type your message.");
+      setVoiceState("ERROR");
+    };
+    recognition.onend = () => { if (generationRef.current !== generation) return; finalizeRecognitionTurn(); };
+
+    try { recognition.start(); } catch { recognitionRef.current = null; return false; }
+
+    timerRef.current = window.setInterval(() => {
+      const now = performance.now(); const elapsed = now - startedAtRef.current;
+      if (!speechDetectedRef.current) { if (elapsed >= VOICE_CAPTURE_CONFIG.silenceBeforeSpeechMs) stopRecognition(false); return; }
+      if (elapsed >= VOICE_CAPTURE_CONFIG.startupGraceMs && now - lastSpeechAtRef.current >= VOICE_CAPTURE_CONFIG.silenceAfterSpeechMs) stopRecognition(false);
+    }, 100);
+    return true;
+  }, [finalizeRecognitionTurn, setVoiceState, stopRecognition]);
+
   const startListening = useCallback(async () => {
-    if (!canRecordAudio()) { setError("Microphone recording is not available in this browser. Use the text box instead."); setVoiceState("ERROR"); return; }
     if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") return;
+    // Preferred path: browser-native SpeechRecognition (no server STT provider, no AI credits).
+    if (canUseBrowserStt() && startBrowserListening()) return;
+    if (!canRecordAudio()) { setError("Microphone recording is not available in this browser. Use the text box instead."); setVoiceState("ERROR"); return; }
     const generation = generationRef.current + 1; generationRef.current = generation;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
+
     try {
       await ensureCapture();
       if (generationRef.current !== generation) return;
