@@ -23,6 +23,34 @@ function canRecordAudio() {
   return typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(audioContextConstructor());
 }
 
+/** Browser-native Web Speech API — free, no server STT provider / AI credits involved. */
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0?: { transcript?: string } }> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+function speechRecognitionConstructor(): (new () => SpeechRecognitionLike) | undefined {
+  if (typeof window === "undefined") return undefined;
+  const scope = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+  };
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition;
+}
+
+function canUseBrowserStt() {
+  return Boolean(speechRecognitionConstructor());
+}
+
+
 function encodeWav(chunks: Float32Array[], inputRate: number): Blob {
   const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
   const input = new Float32Array(length);
@@ -74,10 +102,20 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const generationRef = useRef(0);
   const ringRef = useRef<Float32Array[]>([]);
   const activeRef = useRef(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const finalTextRef = useRef("");
+  const submittedRef = useRef(false);
+  const [sttMode, setSttMode] = useState<"browser" | "provider" | "none">("none");
   onTranscriptRef.current = onTranscript; mutedRef.current = muted; autoRef.current = autoMode;
 
   const setVoiceState = useCallback((next: VoiceState) => { stateRef.current = next; setState(next); }, []);
-  useEffect(() => { setSupported(canRecordAudio()); setSpeechSupported(typeof window !== "undefined" && "speechSynthesis" in window); }, []);
+  useEffect(() => {
+    const browser = canUseBrowserStt();
+    setSttMode(browser ? "browser" : canRecordAudio() ? "provider" : "none");
+    setSupported(browser || canRecordAudio());
+    setSpeechSupported(typeof window !== "undefined" && "speechSynthesis" in window);
+  }, []);
+
 
   const releaseCapture = useCallback(async () => {
     if (timerRef.current !== null) window.clearInterval(timerRef.current);
@@ -176,11 +214,82 @@ export function useVoiceConversation({ onTranscript }: Options) {
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not transcribe the recording."); setVoiceState("ERROR"); }
   }, [endTurn, setVoiceState, transcribe]);
 
+  // ---- Browser-native SpeechRecognition path (preferred when available) ----
+  const stopRecognition = useCallback((abort: boolean) => {
+    const recognition = recognitionRef.current;
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    if (!recognition) return;
+    if (abort) { recognitionRef.current = null; recognition.onresult = null; recognition.onerror = null; recognition.onend = null; try { recognition.abort(); } catch { /* already stopped */ } }
+    else { try { recognition.stop(); } catch { /* already stopped */ } }
+  }, []);
+
+  const finalizeRecognitionTurn = useCallback(() => {
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    recognitionRef.current = null;
+    if (submittedRef.current) return; // guards against duplicate patient messages
+    submittedRef.current = true;
+    const text = finalTextRef.current.trim();
+    if (!text) { if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") setVoiceState("IDLE"); return; }
+    setTranscript(text); setVoiceState("PROCESSING"); onTranscriptRef.current(text);
+  }, [setVoiceState]);
+
+  const startBrowserListening = useCallback(() => {
+    const Ctor = speechRecognitionConstructor();
+    if (!Ctor) return false;
+    const generation = generationRef.current + 1; generationRef.current = generation;
+    const recognition = new Ctor();
+    recognition.continuous = true; recognition.interimResults = true; recognition.lang = "en-US"; recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+    finalTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false;
+    startedAtRef.current = performance.now(); lastSpeechAtRef.current = startedAtRef.current;
+    setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
+
+    recognition.onresult = (event) => {
+      if (generationRef.current !== generation) return;
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i]; if (!result) continue;
+        const text = result[0]?.transcript ?? "";
+        if (result.isFinal) finalTextRef.current = `${finalTextRef.current} ${text}`.trim();
+        else interim += text;
+      }
+      if (finalTextRef.current || interim.trim()) { speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now(); }
+      if (stateRef.current === "LISTENING" && speechDetectedRef.current) setVoiceState("RECORDING");
+      setTranscript(`${finalTextRef.current} ${interim}`.trim());
+    };
+    recognition.onerror = (event) => {
+      if (generationRef.current !== generation) return;
+      const code = event.error ?? "";
+      if (code === "no-speech" || code === "aborted") return; // onend handles the turn
+      submittedRef.current = true;
+      stopRecognition(true);
+      setError(code === "not-allowed" || code === "service-not-allowed"
+        ? "Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below."
+        : code === "network"
+          ? "Speech recognition lost its network connection. Please try again or type your message."
+          : "Speech recognition failed. Please try again or type your message.");
+      setVoiceState("ERROR");
+    };
+    recognition.onend = () => { if (generationRef.current !== generation) return; finalizeRecognitionTurn(); };
+
+    try { recognition.start(); } catch { recognitionRef.current = null; return false; }
+
+    timerRef.current = window.setInterval(() => {
+      const now = performance.now(); const elapsed = now - startedAtRef.current;
+      if (!speechDetectedRef.current) { if (elapsed >= VOICE_CAPTURE_CONFIG.silenceBeforeSpeechMs) stopRecognition(false); return; }
+      if (elapsed >= VOICE_CAPTURE_CONFIG.startupGraceMs && now - lastSpeechAtRef.current >= VOICE_CAPTURE_CONFIG.silenceAfterSpeechMs) stopRecognition(false);
+    }, 100);
+    return true;
+  }, [finalizeRecognitionTurn, setVoiceState, stopRecognition]);
+
   const startListening = useCallback(async () => {
-    if (!canRecordAudio()) { setError("Microphone recording is not available in this browser. Use the text box instead."); setVoiceState("ERROR"); return; }
     if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") return;
+    // Preferred path: browser-native SpeechRecognition (no server STT provider, no AI credits).
+    if (canUseBrowserStt() && startBrowserListening()) return;
+    if (!canRecordAudio()) { setError("Microphone recording is not available in this browser. Use the text box instead."); setVoiceState("ERROR"); return; }
     const generation = generationRef.current + 1; generationRef.current = generation;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
+
     try {
       await ensureCapture();
       if (generationRef.current !== generation) return;
@@ -205,23 +314,31 @@ export function useVoiceConversation({ onTranscript }: Options) {
   }, [ensureCapture, finishCapture, releaseCapture, setVoiceState]);
 
 
-  const stopListening = useCallback(() => { void finishCapture(); }, [finishCapture]);
-  const cancelListening = useCallback(() => { generationRef.current += 1; pcmRef.current = []; speechDetectedRef.current = false; endTurn(); setVoiceState("IDLE"); }, [endTurn, setVoiceState]);
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) { stopRecognition(false); return; }
+    void finishCapture();
+  }, [finishCapture, stopRecognition]);
+  const cancelListening = useCallback(() => {
+    generationRef.current += 1; submittedRef.current = true; finalTextRef.current = "";
+    stopRecognition(true);
+    pcmRef.current = []; speechDetectedRef.current = false; endTurn(); setVoiceState("IDLE");
+  }, [endTurn, setVoiceState, stopRecognition]);
   const stopSpeaking = useCallback(() => { window.speechSynthesis?.cancel(); if (stateRef.current === "SPEAKING") setVoiceState("IDLE"); }, [setVoiceState]);
   const speak = useCallback((text: string) => {
-    const finish = () => { if (stateRef.current === "ENDED") return; setVoiceState("IDLE"); if (autoRef.current && canRecordAudio()) window.setTimeout(() => { if (stateRef.current === "IDLE" && autoRef.current) void startListening(); }, 350); };
+    const finish = () => { if (stateRef.current === "ENDED") return; setVoiceState("IDLE"); if (autoRef.current && (canUseBrowserStt() || canRecordAudio())) window.setTimeout(() => { if (stateRef.current === "IDLE" && autoRef.current) void startListening(); }, 350); };
     if (mutedRef.current || !("speechSynthesis" in window) || !text.trim()) { finish(); return; }
     try { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.lang = "en-US"; utterance.rate = 1; utterance.pitch = 1; utterance.onend = finish; utterance.onerror = finish; setVoiceState("SPEAKING"); window.speechSynthesis.speak(utterance); } catch { finish(); }
   }, [setVoiceState, startListening]);
-  const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState]);
+  const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; submittedRef.current = true; stopRecognition(true); pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState, stopRecognition]);
   const reset = useCallback(() => { setError(null); setTranscript(""); setVoiceState("IDLE"); }, [setVoiceState]);
 
   // Warm the microphone ahead of the first turn when permission was already granted,
   // so the pre-roll buffer is filled before the patient starts speaking.
+  // Only needed for the server STT provider path; browser SpeechRecognition manages its own capture.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (!canRecordAudio()) return;
+      if (canUseBrowserStt() || !canRecordAudio()) return;
       const granted = await navigator.permissions?.query({ name: "microphone" as PermissionName }).then((s) => s.state === "granted").catch(() => false);
       if (!granted || cancelled || stateRef.current !== "IDLE" || streamRef.current) return;
       await ensureCapture().catch(() => undefined);
@@ -231,7 +348,9 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
 
 
-  useEffect(() => () => { generationRef.current += 1; if (timerRef.current !== null) window.clearInterval(timerRef.current); processorRef.current?.disconnect(); sourceRef.current?.disconnect(); streamRef.current?.getTracks().forEach((track) => track.stop()); void contextRef.current?.close(); window.speechSynthesis?.cancel(); }, []);
 
-  return { supported, speechSupported, state, transcript, error, muted, setMuted, autoMode, setAutoMode, startListening, stopListening, cancelListening, stopSpeaking, speak, setVoiceState, endSession, reset };
+  useEffect(() => () => { generationRef.current += 1; if (timerRef.current !== null) window.clearInterval(timerRef.current); const recognition = recognitionRef.current; recognitionRef.current = null; if (recognition) { recognition.onresult = null; recognition.onerror = null; recognition.onend = null; try { recognition.abort(); } catch { /* already stopped */ } } processorRef.current?.disconnect(); sourceRef.current?.disconnect(); streamRef.current?.getTracks().forEach((track) => track.stop()); void contextRef.current?.close(); window.speechSynthesis?.cancel(); }, []);
+
+  return { supported, speechSupported, sttMode, state, transcript, error, muted, setMuted, autoMode, setAutoMode, startListening, stopListening, cancelListening, stopSpeaking, speak, setVoiceState, endSession, reset };
+
 }
