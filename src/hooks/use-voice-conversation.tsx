@@ -23,6 +23,34 @@ function canRecordAudio() {
   return typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(audioContextConstructor());
 }
 
+/** Browser-native Web Speech API — free, no server STT provider / AI credits involved. */
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0?: { transcript?: string } }> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+function speechRecognitionConstructor(): (new () => SpeechRecognitionLike) | undefined {
+  if (typeof window === "undefined") return undefined;
+  const scope = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+  };
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition;
+}
+
+function canUseBrowserStt() {
+  return Boolean(speechRecognitionConstructor());
+}
+
+
 function encodeWav(chunks: Float32Array[], inputRate: number): Blob {
   const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
   const input = new Float32Array(length);
