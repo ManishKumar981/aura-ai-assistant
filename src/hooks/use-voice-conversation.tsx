@@ -314,29 +314,38 @@ export function useVoiceConversation({ onTranscript }: Options) {
   }, [ensureCapture, finishCapture, releaseCapture, setVoiceState]);
 
 
-  const stopListening = useCallback(() => { void finishCapture(); }, [finishCapture]);
-  const cancelListening = useCallback(() => { generationRef.current += 1; pcmRef.current = []; speechDetectedRef.current = false; endTurn(); setVoiceState("IDLE"); }, [endTurn, setVoiceState]);
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) { stopRecognition(false); return; }
+    void finishCapture();
+  }, [finishCapture, stopRecognition]);
+  const cancelListening = useCallback(() => {
+    generationRef.current += 1; submittedRef.current = true; finalTextRef.current = "";
+    stopRecognition(true);
+    pcmRef.current = []; speechDetectedRef.current = false; endTurn(); setVoiceState("IDLE");
+  }, [endTurn, setVoiceState, stopRecognition]);
   const stopSpeaking = useCallback(() => { window.speechSynthesis?.cancel(); if (stateRef.current === "SPEAKING") setVoiceState("IDLE"); }, [setVoiceState]);
   const speak = useCallback((text: string) => {
-    const finish = () => { if (stateRef.current === "ENDED") return; setVoiceState("IDLE"); if (autoRef.current && canRecordAudio()) window.setTimeout(() => { if (stateRef.current === "IDLE" && autoRef.current) void startListening(); }, 350); };
+    const finish = () => { if (stateRef.current === "ENDED") return; setVoiceState("IDLE"); if (autoRef.current && (canUseBrowserStt() || canRecordAudio())) window.setTimeout(() => { if (stateRef.current === "IDLE" && autoRef.current) void startListening(); }, 350); };
     if (mutedRef.current || !("speechSynthesis" in window) || !text.trim()) { finish(); return; }
     try { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.lang = "en-US"; utterance.rate = 1; utterance.pitch = 1; utterance.onend = finish; utterance.onerror = finish; setVoiceState("SPEAKING"); window.speechSynthesis.speak(utterance); } catch { finish(); }
   }, [setVoiceState, startListening]);
-  const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState]);
+  const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; submittedRef.current = true; stopRecognition(true); pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState, stopRecognition]);
   const reset = useCallback(() => { setError(null); setTranscript(""); setVoiceState("IDLE"); }, [setVoiceState]);
 
   // Warm the microphone ahead of the first turn when permission was already granted,
   // so the pre-roll buffer is filled before the patient starts speaking.
+  // Only needed for the server STT provider path; browser SpeechRecognition manages its own capture.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (!canRecordAudio()) return;
+      if (canUseBrowserStt() || !canRecordAudio()) return;
       const granted = await navigator.permissions?.query({ name: "microphone" as PermissionName }).then((s) => s.state === "granted").catch(() => false);
       if (!granted || cancelled || stateRef.current !== "IDLE" || streamRef.current) return;
       await ensureCapture().catch(() => undefined);
     })();
     return () => { cancelled = true; };
   }, [ensureCapture]);
+
 
 
 
