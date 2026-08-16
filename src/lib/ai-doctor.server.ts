@@ -9,6 +9,7 @@
  */
 
 import { stateGuidance, type ConsultationState } from "./consultation-engine";
+import { getAIProvider } from "./providers/index.server";
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -52,50 +53,20 @@ export function demoReply(history: ChatTurn[], state?: ConsultationState): strin
 }
 
 
-export function aiDoctorConfig() {
-  const apiKey = process.env["AI_DOCTOR_API_KEY"] ?? process.env["LOVABLE_API_KEY"];
-  const mode = (process.env["AI_DOCTOR_MODE"] ?? "").toLowerCase();
-  const baseUrl = process.env["AI_DOCTOR_BASE_URL"] ?? "https://ai.gateway.lovable.dev/v1";
-  const model = process.env["AI_DOCTOR_MODEL"] ?? "google/gemini-3.5-flash";
-  const demo = mode === "demo" || !apiKey;
-  return { apiKey, baseUrl, model, demo };
-}
-
 export async function generateDoctorReply(
   history: ChatTurn[],
   state?: ConsultationState,
 ): Promise<{ content: string; demo: boolean }> {
-  const { apiKey, baseUrl, model, demo } = aiDoctorConfig();
-  if (demo) return { content: demoReply(history, state), demo: true };
+  const provider = getAIProvider();
+  if (provider.isDemo) return { content: demoReply(history, state), demo: true };
 
   const systemContent = state
     ? `${AI_DOCTOR_SYSTEM_PROMPT}\n\n${stateGuidance(state)}`
     : AI_DOCTOR_SYSTEM_PROMPT;
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": apiKey!,
-      Authorization: `Bearer ${apiKey!}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: systemContent }, ...history],
-    }),
+  const { content } = await provider.generateResponse({
+    system: systemContent,
+    messages: history,
   });
-
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    console.error("AI Doctor provider error", res.status, detail);
-    if (res.status === 429) throw new Error("The AI Doctor is rate limited right now. Please try again in a moment.");
-    if (res.status === 402) throw new Error("AI credits are exhausted. Add credits to continue the consultation.");
-    throw new Error("The AI Doctor is unavailable right now. Please try again.");
-  }
-
-  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const content = json.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("The AI Doctor returned an empty response. Please try again.");
   return { content, demo: false };
 }

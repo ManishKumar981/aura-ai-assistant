@@ -1,3 +1,5 @@
+import { ProviderError, getSTTProvider } from "./providers/index.server";
+
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MIN_AUDIO_BYTES = 2048;
 const ACCEPTED_AUDIO_TYPES = new Set(["audio/wav", "audio/wave", "audio/x-wav"]);
@@ -24,18 +26,22 @@ export async function transcribeVoiceRequest(request: Request): Promise<Response
   if (audio.size > MAX_AUDIO_BYTES) return new Response("The recording is too large to transcribe.", { status: 413 });
   if (!ACCEPTED_AUDIO_TYPES.has(audio.type.toLowerCase())) return new Response("Only complete WAV recordings are accepted.", { status: 415 });
 
-  const apiKey = process.env["LOVABLE_API_KEY"];
-  if (!apiKey) return new Response("Voice transcription is not configured.", { status: 503 });
-  const upstreamBody = new FormData();
-  upstreamBody.append("model", "openai/gpt-4o-mini-transcribe");
-  upstreamBody.append("file", audio, "recording.wav");
-  upstreamBody.append("stream", "true");
-  const upstream = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
-    method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: upstreamBody,
-  });
-  if (!upstream.ok) {
-    const message = await upstream.text().catch(() => "Transcription failed.");
-    return new Response(message || "Transcription failed.", { status: upstream.status, headers: { "content-type": "text/plain; charset=utf-8" } });
+  const provider = getSTTProvider();
+  if (!provider) return new Response("Voice transcription is not configured.", { status: 503 });
+
+  try {
+    const result = await provider.transcribe({ audio });
+    if (result.kind === "text") {
+      return new Response(result.text, {
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+      });
+    }
+    return new Response(result.body, {
+      headers: { "content-type": result.contentType, "cache-control": "no-store" },
+    });
+  } catch (error) {
+    const status = error instanceof ProviderError ? error.status : 502;
+    const message = error instanceof Error ? error.message : "Transcription failed.";
+    return new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
   }
-  return new Response(upstream.body, { headers: { "content-type": upstream.headers.get("content-type") ?? "text/event-stream; charset=utf-8", "cache-control": "no-store" } });
 }
