@@ -102,10 +102,20 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const generationRef = useRef(0);
   const ringRef = useRef<Float32Array[]>([]);
   const activeRef = useRef(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const finalTextRef = useRef("");
+  const submittedRef = useRef(false);
+  const [sttMode, setSttMode] = useState<"browser" | "provider" | "none">("none");
   onTranscriptRef.current = onTranscript; mutedRef.current = muted; autoRef.current = autoMode;
 
   const setVoiceState = useCallback((next: VoiceState) => { stateRef.current = next; setState(next); }, []);
-  useEffect(() => { setSupported(canRecordAudio()); setSpeechSupported(typeof window !== "undefined" && "speechSynthesis" in window); }, []);
+  useEffect(() => {
+    const browser = canUseBrowserStt();
+    setSttMode(browser ? "browser" : canRecordAudio() ? "provider" : "none");
+    setSupported(browser || canRecordAudio());
+    setSpeechSupported(typeof window !== "undefined" && "speechSynthesis" in window);
+  }, []);
+
 
   const releaseCapture = useCallback(async () => {
     if (timerRef.current !== null) window.clearInterval(timerRef.current);
