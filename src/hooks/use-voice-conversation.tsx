@@ -126,6 +126,9 @@ export function useVoiceConversation({ onTranscript }: Options) {
   // Kept separate from timerRef (a setInterval id) so clearing one never leaks the other.
   const retryTimerRef = useRef<number | null>(null);
   const restartCountRef = useRef(0);
+  // Set below: falls back to MediaRecorder + server STT when the browser's
+  // SpeechRecognition service is blocked (Brave/Firefox) or errors out.
+  const providerFallbackRef = useRef<null | (() => void)>(null);
 
   const [sttMode, setSttMode] = useState<"browser" | "provider" | "none">("none");
   onTranscriptRef.current = onTranscript; mutedRef.current = muted; autoRef.current = autoMode;
@@ -313,6 +316,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
         }
         submittedRef.current = true;
         stopRecognition(true);
+        if (providerFallbackRef.current && canRecordAudio()) { providerFallbackRef.current(); return; }
         setError("Speech recognition lost its network connection. Please try again or use text.");
         setVoiceState("ERROR");
         return;
@@ -320,6 +324,10 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
       submittedRef.current = true;
       stopRecognition(true);
+      if (code !== "not-allowed" && code !== "service-not-allowed" && providerFallbackRef.current && canRecordAudio()) {
+        providerFallbackRef.current();
+        return;
+      }
       setError(code === "not-allowed" || code === "service-not-allowed"
         ? "Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below."
         : "Speech recognition failed. Please try again or type your message.");
@@ -356,25 +364,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
   }, [clearVoiceTimers, finalizeRecognitionTurn, setVoiceState, stopRecognition]);
 
 
-  const startListening = useCallback(async () => {
-    if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") return;
-    // Preferred path: browser-native SpeechRecognition (no server STT provider, no AI credits).
-    if (canUseBrowserStt()) {
-      // Warm up the mic permission first: starting recognition before the user has
-      // granted access makes Chrome fire `not-allowed` / drop the first words.
-      if (canRecordAudio()) {
-        try {
-          const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
-          probe.getTracks().forEach((track) => track.stop());
-        } catch {
-          setError("Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below.");
-          setVoiceState("ERROR");
-          return;
-        }
-      }
-      if (startBrowserListening()) return;
-    }
-
+  const startProviderListening = useCallback(async () => {
     if (!canRecordAudio()) { setError("Microphone recording is not available in this browser. Use the text box instead."); setVoiceState("ERROR"); return; }
     const generation = generationRef.current + 1; generationRef.current = generation;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
@@ -401,6 +391,27 @@ export function useVoiceConversation({ onTranscript }: Options) {
       setVoiceState("ERROR");
     }
   }, [ensureCapture, finishCapture, releaseCapture, setVoiceState]);
+
+  providerFallbackRef.current = () => { void startProviderListening(); };
+
+  const startListening = useCallback(async () => {
+    if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") return;
+    // Preferred path: browser-native SpeechRecognition (no server STT provider, no AI credits).
+    if (canUseBrowserStt()) {
+      if (canRecordAudio()) {
+        try {
+          const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+          probe.getTracks().forEach((track) => track.stop());
+        } catch {
+          setError("Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below.");
+          setVoiceState("ERROR");
+          return;
+        }
+      }
+      if (startBrowserListening()) return;
+    }
+    await startProviderListening();
+  }, [setVoiceState, startBrowserListening, startProviderListening]);
 
 
   const stopListening = useCallback(() => {
