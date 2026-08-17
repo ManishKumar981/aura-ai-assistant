@@ -44,7 +44,14 @@ export function demoReply(history: ChatTurn[], state?: ConsultationState): strin
     if (state.emergency) {
       return `${ack} What you've described could be serious, so please seek urgent in-person or emergency care now. I'm an AI assistant, not a licensed doctor, and I can't diagnose you. ${state.nextQuestion ?? "Is anyone with you who can help you get seen quickly?"}`;
     }
-    if (state.nextQuestion) return `${ack} ${state.nextQuestion}`;
+    if (state.nextQuestion) {
+      // Do not repeat the identical question turn after turn when a short answer
+      // did not fill the slot — fall back to the scripted sequence instead.
+      const lastDoctor = [...history].reverse().find((t) => t.role === "assistant")?.content ?? "";
+      if (!lastDoctor.includes(state.nextQuestion)) return `${ack} ${state.nextQuestion}`;
+      const asked = history.filter((t) => t.role === "assistant").length;
+      return DEMO_SEQUENCE[Math.min(asked, DEMO_SEQUENCE.length - 1)]!;
+    }
     return "Thank you — that gives me a clear picture. To recap what you told me, I've captured your main concern, how long it has lasted, how severe it is, the warning signs we checked, and your background history. I can't give a diagnosis, so a qualified clinician should review this. Please seek care sooner if anything worsens. You can end the consultation whenever you're ready.";
   }
   const patientTurns = history.filter((t) => t.role === "user").length;

@@ -48,7 +48,9 @@ export function getAIProvider(): AIProvider {
     return new DemoAIProvider();
   }
 
-  return new DemoAIProvider();
+  // No explicit provider configured: use the hosted gateway when a key exists,
+  // otherwise fall back to scripted demo replies.
+  return createLovableAIProvider() ?? new DemoAIProvider();
 }
 
 export function getSTTProvider(): STTProvider | null {
