@@ -120,11 +120,13 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const activeRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const finalTextRef = useRef("");
+  const interimTextRef = useRef("");
   const submittedRef = useRef(false);
   const intentionalStopRef = useRef(false);
   const networkErrorCountRef = useRef(0);
   // Kept separate from timerRef (a setInterval id) so clearing one never leaks the other.
   const retryTimerRef = useRef<number | null>(null);
+  const finalizeTimerRef = useRef<number | null>(null);
   const restartCountRef = useRef(0);
   // Set below: falls back to MediaRecorder + server STT when the browser's
   // SpeechRecognition service is blocked (Brave/Firefox) or errors out.
@@ -243,6 +245,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const clearVoiceTimers = useCallback(() => {
     if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
     if (retryTimerRef.current !== null) { window.clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+    if (finalizeTimerRef.current !== null) { window.clearTimeout(finalizeTimerRef.current); finalizeTimerRef.current = null; }
   }, []);
 
   const stopRecognition = useCallback((abort: boolean) => {
@@ -255,13 +258,29 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
   const finalizeRecognitionTurn = useCallback(() => {
     clearVoiceTimers();
+    const recognition = recognitionRef.current;
     recognitionRef.current = null;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+    }
     if (submittedRef.current) return; // guards against duplicate patient messages
     submittedRef.current = true;
-    const text = finalTextRef.current.trim();
+    // Chrome sometimes stops with the last phrase still marked as interim. Keep it
+    // rather than leaving the consultation stuck or dropping the patient's words.
+    const text = `${finalTextRef.current} ${interimTextRef.current}`.trim();
     if (!text) { if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") setVoiceState("IDLE"); return; }
     setTranscript(text); setVoiceState("PROCESSING"); onTranscriptRef.current(text);
   }, [clearVoiceTimers, setVoiceState]);
+
+  const stopAndFinalizeRecognition = useCallback(() => {
+    intentionalStopRef.current = true;
+    stopRecognition(false);
+    // Some Chrome/WebView versions never dispatch `onend` after stop(). Guarantee
+    // that a recognized utterance is submitted, while the duplicate guard keeps it once-only.
+    finalizeTimerRef.current = window.setTimeout(finalizeRecognitionTurn, 700);
+  }, [finalizeRecognitionTurn, stopRecognition]);
 
   const startBrowserListening = useCallback(() => {
     const Ctor = speechRecognitionConstructor();
@@ -271,7 +290,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
     const recognition = new Ctor();
     recognition.continuous = true; recognition.interimResults = true; recognition.lang = speechLanguage(); recognition.maxAlternatives = 1;
     recognitionRef.current = recognition;
-    finalTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false;
+    finalTextRef.current = ""; interimTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false;
     networkErrorCountRef.current = 0; restartCountRef.current = 0; intentionalStopRef.current = false;
     startedAtRef.current = performance.now(); lastSpeechAtRef.current = startedAtRef.current;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
@@ -287,6 +306,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
         else interim += text;
       }
       if (finalChunk) finalTextRef.current = `${finalTextRef.current} ${finalChunk}`.trim();
+      interimTextRef.current = interim.trim();
       const combined = `${finalTextRef.current} ${interim}`.trim();
       if (finalChunk || interim.trim()) { speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now(); }
       if (stateRef.current === "LISTENING" && speechDetectedRef.current) setVoiceState("RECORDING");
@@ -357,11 +377,11 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
     timerRef.current = window.setInterval(() => {
       const now = performance.now(); const elapsed = now - startedAtRef.current;
-      if (!speechDetectedRef.current) { if (elapsed >= VOICE_CAPTURE_CONFIG.silenceBeforeSpeechMs) { intentionalStopRef.current = true; stopRecognition(false); } return; }
-      if (elapsed >= VOICE_CAPTURE_CONFIG.startupGraceMs && now - lastSpeechAtRef.current >= VOICE_CAPTURE_CONFIG.silenceAfterSpeechMs) { intentionalStopRef.current = true; stopRecognition(false); }
+      if (!speechDetectedRef.current) { if (elapsed >= VOICE_CAPTURE_CONFIG.silenceBeforeSpeechMs) stopAndFinalizeRecognition(); return; }
+      if (elapsed >= VOICE_CAPTURE_CONFIG.startupGraceMs && now - lastSpeechAtRef.current >= VOICE_CAPTURE_CONFIG.silenceAfterSpeechMs) stopAndFinalizeRecognition();
     }, 100);
     return true;
-  }, [clearVoiceTimers, finalizeRecognitionTurn, setVoiceState, stopRecognition]);
+  }, [clearVoiceTimers, finalizeRecognitionTurn, setVoiceState, stopAndFinalizeRecognition, stopRecognition]);
 
 
   const startProviderListening = useCallback(async () => {
@@ -415,11 +435,11 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
 
   const stopListening = useCallback(() => {
-    if (recognitionRef.current) { intentionalStopRef.current = true; stopRecognition(false); return; }
+    if (recognitionRef.current) { stopAndFinalizeRecognition(); return; }
     void finishCapture();
-  }, [finishCapture, stopRecognition]);
+  }, [finishCapture, stopAndFinalizeRecognition]);
   const cancelListening = useCallback(() => {
-    generationRef.current += 1; submittedRef.current = true; finalTextRef.current = "";
+    generationRef.current += 1; submittedRef.current = true; finalTextRef.current = ""; interimTextRef.current = "";
     clearVoiceTimers();
     intentionalStopRef.current = false;
     stopRecognition(true);
