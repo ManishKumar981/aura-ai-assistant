@@ -359,7 +359,22 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const startListening = useCallback(async () => {
     if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") return;
     // Preferred path: browser-native SpeechRecognition (no server STT provider, no AI credits).
-    if (canUseBrowserStt() && startBrowserListening()) return;
+    if (canUseBrowserStt()) {
+      // Warm up the mic permission first: starting recognition before the user has
+      // granted access makes Chrome fire `not-allowed` / drop the first words.
+      if (canRecordAudio()) {
+        try {
+          const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+          probe.getTracks().forEach((track) => track.stop());
+        } catch {
+          setError("Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below.");
+          setVoiceState("ERROR");
+          return;
+        }
+      }
+      if (startBrowserListening()) return;
+    }
+
     if (!canRecordAudio()) { setError("Microphone recording is not available in this browser. Use the text box instead."); setVoiceState("ERROR"); return; }
     const generation = generationRef.current + 1; generationRef.current = generation;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
