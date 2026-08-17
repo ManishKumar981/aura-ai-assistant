@@ -24,6 +24,7 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -34,14 +35,35 @@ function LoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setNeedsConfirm(false);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setBusy(false);
     if (error) {
-      toast.error(error.message);
+      const message = error.message.toLowerCase();
+      if (message.includes("not confirmed")) {
+        setNeedsConfirm(true);
+        toast.error("Confirm your email first — we can resend the link.");
+      } else if (message.includes("invalid login credentials")) {
+        toast.error("Email or password is incorrect.");
+      } else {
+        toast.error(error.message);
+      }
       return;
     }
     toast.success("Welcome back");
     navigate({ to: "/dashboard", replace: true });
+  }
+
+  async function resendConfirmation() {
+    setBusy(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else toast.success("Confirmation email sent");
   }
 
   return (
