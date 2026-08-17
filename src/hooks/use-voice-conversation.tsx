@@ -337,9 +337,9 @@ export function useVoiceConversation({ onTranscript }: Options) {
       restartCountRef.current += 1;
       if (restartCountRef.current > 8) { finalizeRecognitionTurn(); return; }
       try {
+        // Do NOT touch lastSpeechAtRef here: our own silence timer must keep
+        // running across restarts so the turn still auto-submits.
         recognition.start();
-        // Restarting resets the engine's silence tracking; keep our own timer honest.
-        lastSpeechAtRef.current = performance.now();
       } catch {
         finalizeRecognitionTurn();
       }
@@ -403,7 +403,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const speak = useCallback((text: string) => {
     const finish = () => { if (stateRef.current === "ENDED") return; setVoiceState("IDLE"); if (autoRef.current && (canUseBrowserStt() || canRecordAudio())) window.setTimeout(() => { if (stateRef.current === "IDLE" && autoRef.current) void startListening(); }, 350); };
     if (mutedRef.current || !("speechSynthesis" in window) || !text.trim()) { finish(); return; }
-    try { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.lang = "en-US"; utterance.rate = 1; utterance.pitch = 1; utterance.onend = finish; utterance.onerror = finish; setVoiceState("SPEAKING"); window.speechSynthesis.speak(utterance); } catch { finish(); }
+    try { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.lang = speechLanguage(); utterance.rate = 1; utterance.pitch = 1; utterance.onend = finish; utterance.onerror = finish; setVoiceState("SPEAKING"); window.speechSynthesis.speak(utterance); } catch { finish(); }
   }, [setVoiceState, startListening]);
   const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; submittedRef.current = true; intentionalStopRef.current = true; stopRecognition(true); pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState, stopRecognition]);
   const reset = useCallback(() => { setError(null); setTranscript(""); setVoiceState("IDLE"); }, [setVoiceState]);
