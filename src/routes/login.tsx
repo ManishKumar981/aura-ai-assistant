@@ -24,6 +24,7 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -34,14 +35,35 @@ function LoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setNeedsConfirm(false);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setBusy(false);
     if (error) {
-      toast.error(error.message);
+      const message = error.message.toLowerCase();
+      if (message.includes("not confirmed")) {
+        setNeedsConfirm(true);
+        toast.error("Confirm your email first — we can resend the link.");
+      } else if (message.includes("invalid login credentials")) {
+        toast.error("Email or password is incorrect.");
+      } else {
+        toast.error(error.message);
+      }
       return;
     }
     toast.success("Welcome back");
     navigate({ to: "/dashboard", replace: true });
+  }
+
+  async function resendConfirmation() {
+    setBusy(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else toast.success("Confirmation email sent");
   }
 
   return (
@@ -64,13 +86,28 @@ function LoginPage() {
               <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@clinic.com" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link to="/forgot-password" className="text-xs font-medium text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
               <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
             </div>
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}
             </Button>
           </form>
+
+          {needsConfirm && (
+            <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <p className="text-muted-foreground">This account still needs email confirmation.</p>
+              <Button type="button" variant="outline" size="sm" className="mt-2" disabled={busy} onClick={resendConfirmation}>
+                Resend confirmation email
+              </Button>
+            </div>
+          )}
+
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             No account?{" "}
