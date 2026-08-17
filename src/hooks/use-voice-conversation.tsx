@@ -237,32 +237,39 @@ export function useVoiceConversation({ onTranscript }: Options) {
   }, [endTurn, setVoiceState, transcribe]);
 
   // ---- Browser-native SpeechRecognition path (preferred when available) ----
+  const clearVoiceTimers = useCallback(() => {
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    if (retryTimerRef.current !== null) { window.clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+  }, []);
+
   const stopRecognition = useCallback((abort: boolean) => {
     const recognition = recognitionRef.current;
-    if (timerRef.current !== null) { window.clearInterval(timerRef.current); window.clearTimeout(timerRef.current as unknown as number); timerRef.current = null; }
+    clearVoiceTimers();
     if (!recognition) return;
     if (abort) { recognitionRef.current = null; recognition.onresult = null; recognition.onerror = null; recognition.onend = null; try { recognition.abort(); } catch { /* already stopped */ } }
     else { try { recognition.stop(); } catch { /* already stopped */ } }
-  }, []);
+  }, [clearVoiceTimers]);
 
   const finalizeRecognitionTurn = useCallback(() => {
-    if (timerRef.current !== null) { window.clearInterval(timerRef.current); window.clearTimeout(timerRef.current as unknown as number); timerRef.current = null; }
+    clearVoiceTimers();
     recognitionRef.current = null;
     if (submittedRef.current) return; // guards against duplicate patient messages
     submittedRef.current = true;
     const text = finalTextRef.current.trim();
     if (!text) { if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") setVoiceState("IDLE"); return; }
     setTranscript(text); setVoiceState("PROCESSING"); onTranscriptRef.current(text);
-  }, [setVoiceState]);
+  }, [clearVoiceTimers, setVoiceState]);
 
   const startBrowserListening = useCallback(() => {
     const Ctor = speechRecognitionConstructor();
     if (!Ctor) return false;
     const generation = generationRef.current + 1; generationRef.current = generation;
+    clearVoiceTimers();
     const recognition = new Ctor();
-    recognition.continuous = true; recognition.interimResults = true; recognition.lang = "en-US"; recognition.maxAlternatives = 1;
+    recognition.continuous = true; recognition.interimResults = true; recognition.lang = speechLanguage(); recognition.maxAlternatives = 1;
     recognitionRef.current = recognition;
-    finalTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false; networkErrorCountRef.current = 0;
+    finalTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false;
+    networkErrorCountRef.current = 0; restartCountRef.current = 0; intentionalStopRef.current = false;
     startedAtRef.current = performance.now(); lastSpeechAtRef.current = startedAtRef.current;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
 
@@ -276,11 +283,9 @@ export function useVoiceConversation({ onTranscript }: Options) {
         if (result.isFinal) finalChunk += `${finalChunk ? " " : ""}${text}`.trim();
         else interim += text;
       }
-      if (finalChunk) {
-        finalTextRef.current = `${finalTextRef.current} ${finalChunk}`.trim();
-      }
+      if (finalChunk) finalTextRef.current = `${finalTextRef.current} ${finalChunk}`.trim();
       const combined = `${finalTextRef.current} ${interim}`.trim();
-      if (finalTextRef.current || interim.trim()) { speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now(); }
+      if (finalChunk || interim.trim()) { speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now(); }
       if (stateRef.current === "LISTENING" && speechDetectedRef.current) setVoiceState("RECORDING");
       setTranscript(combined);
     };
@@ -288,36 +293,31 @@ export function useVoiceConversation({ onTranscript }: Options) {
       if (generationRef.current !== generation) return;
       const code = event.error ?? "";
       if (code === "no-speech" || code === "aborted") return; // onend handles the turn
-      
-      // Network errors: retry with backoff instead of failing immediately
+
+      // Network errors are transient in Chrome: retry with bounded backoff.
       if (code === "network") {
         networkErrorCountRef.current += 1;
         if (networkErrorCountRef.current <= 3) {
-          const backoffMs = Math.min(1000 * Math.pow(2, networkErrorCountRef.current - 1), 5000);
+          const backoffMs = Math.min(400 * 2 ** (networkErrorCountRef.current - 1), 3000);
+          const carried = finalTextRef.current;
           stopRecognition(true);
-          if (timerRef.current !== null) window.clearTimeout(timerRef.current as unknown as number);
-          timerRef.current = window.setTimeout(() => {
-            if (generationRef.current === generation && canUseBrowserStt()) {
-              try {
-                startBrowserListening();
-              } catch {
-                // If retry fails, fall through to error state
-                submittedRef.current = true;
-                setError("Speech recognition unavailable after multiple retries. Please try again or use text.");
-                setVoiceState("ERROR");
-              }
-            }
-          }, backoffMs) as unknown as number;
+          retryTimerRef.current = window.setTimeout(() => {
+            retryTimerRef.current = null;
+            if (generationRef.current !== generation) return;
+            if (startBrowserListening()) { finalTextRef.current = carried; return; }
+            submittedRef.current = true;
+            setError("Speech recognition is unavailable right now. Please type your message instead.");
+            setVoiceState("ERROR");
+          }, backoffMs);
           return;
         }
-        // After 3 retries, give up
         submittedRef.current = true;
         stopRecognition(true);
         setError("Speech recognition lost its network connection. Please try again or use text.");
         setVoiceState("ERROR");
         return;
       }
-      
+
       submittedRef.current = true;
       stopRecognition(true);
       setError(code === "not-allowed" || code === "service-not-allowed"
@@ -328,19 +328,19 @@ export function useVoiceConversation({ onTranscript }: Options) {
     recognition.onend = () => {
       if (generationRef.current !== generation) return;
       if (submittedRef.current) return;
-      
-      // If we intentionally stopped (silence timer or manual stop), finalize without restarting
-      if (intentionalStopRef.current) {
-        intentionalStopRef.current = false;
-        finalizeRecognitionTurn();
-        return;
-      }
-      
-      // Unexpected stop - try to restart
+
+      // Intentional stop (silence timer or manual stop) -> submit the turn.
+      if (intentionalStopRef.current) { intentionalStopRef.current = false; finalizeRecognitionTurn(); return; }
+
+      // Chrome ends the session on its own after a short pause. Restart so natural
+      // pauses mid-sentence do not cut the patient off, but cap the restarts.
+      restartCountRef.current += 1;
+      if (restartCountRef.current > 8) { finalizeRecognitionTurn(); return; }
       try {
         recognition.start();
+        // Restarting resets the engine's silence tracking; keep our own timer honest.
+        lastSpeechAtRef.current = performance.now();
       } catch {
-        // If restart fails, finalize cleanly
         finalizeRecognitionTurn();
       }
     };
@@ -353,7 +353,8 @@ export function useVoiceConversation({ onTranscript }: Options) {
       if (elapsed >= VOICE_CAPTURE_CONFIG.startupGraceMs && now - lastSpeechAtRef.current >= VOICE_CAPTURE_CONFIG.silenceAfterSpeechMs) { intentionalStopRef.current = true; stopRecognition(false); }
     }, 100);
     return true;
-  }, [finalizeRecognitionTurn, setVoiceState, stopRecognition]);
+  }, [clearVoiceTimers, finalizeRecognitionTurn, setVoiceState, stopRecognition]);
+
 
   const startListening = useCallback(async () => {
     if (stateRef.current === "LISTENING" || stateRef.current === "RECORDING") return;
