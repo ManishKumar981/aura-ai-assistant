@@ -67,13 +67,6 @@ const SLOTS: SlotDef[] = [
     patient: [/\S{3,}/],
   },
   {
-    id: "onset",
-    label: "Onset",
-    stage: "SYMPTOM_DETAIL",
-    question: "Did this start suddenly or come on gradually?",
-    patient: [/\b(sudden\w*|gradual\w*|slowly|all at once|out of nowhere|after|since (?:i|the|a)\b|started\b)/i],
-  },
-  {
     id: "duration",
     label: "Duration",
     stage: "SYMPTOM_DETAIL",
@@ -88,7 +81,15 @@ const SLOTS: SlotDef[] = [
     label: "Severity",
     stage: "SYMPTOM_DETAIL",
     question: "On a scale of 1 to 10, how bad is it at its worst?",
-    patient: [/\b\d{1,2}\s*(?:\/|out of)\s*10\b/i, /\b(mild|moderate|severe|unbearable|excruciating|slight|intense|bearable)\b/i],
+    patient: [/\b\d{1,2}\s*(?:\/|out of)\s*10\b/i, /\b\d{1,2}\b/, /\b(mild|moderate|severe|unbearable|excruciating|slight|intense|bearable)\b/i],
+    answeredIfAsked: true,
+  },
+  {
+    id: "onset",
+    label: "Onset",
+    stage: "SYMPTOM_DETAIL",
+    question: "Did this start suddenly or come on gradually?",
+    patient: [/\b(sudden\w*|gradual\w*|slowly|all at once|out of nowhere|after|since (?:i|the|a)\b|started\b)/i],
   },
   {
     id: "character",
@@ -277,11 +278,13 @@ function askedMarker(id: SlotId, text: string): boolean {
 /** Guidance block injected into the AI Doctor system prompt each turn. */
 export function stateGuidance(state: ConsultationState): string {
   const covered = state.slots.filter((s) => s.filled).map((s) => s.label);
+  const asked = state.slots.filter((s) => s.asked && !s.filled).map((s) => s.label);
   const remaining = state.slots.filter((s) => !s.filled).map((s) => s.label);
   const lines = [
     `CONSULTATION STATE (derived from the transcript — treat as fact):`,
     `- Current stage: ${STAGE_LABELS[state.stage]}`,
     `- Already covered (do NOT ask about these again): ${covered.length ? covered.join(", ") : "nothing yet"}`,
+    `- Already asked but not yet answered (try rephrasing or moving on): ${asked.length ? asked.join(", ") : "none"}`,
     `- Still missing: ${remaining.length ? remaining.join(", ") : "nothing — move to wrap-up"}`,
   ];
   if (state.nextQuestion) {

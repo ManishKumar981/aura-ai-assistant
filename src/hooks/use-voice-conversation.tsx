@@ -105,6 +105,8 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const finalTextRef = useRef("");
   const submittedRef = useRef(false);
+  const intentionalStopRef = useRef(false);
+  const networkErrorCountRef = useRef(0);
   const [sttMode, setSttMode] = useState<"browser" | "provider" | "none">("none");
   onTranscriptRef.current = onTranscript; mutedRef.current = muted; autoRef.current = autoMode;
 
@@ -118,7 +120,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
 
   const releaseCapture = useCallback(async () => {
-    if (timerRef.current !== null) window.clearInterval(timerRef.current);
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); window.clearTimeout(timerRef.current as unknown as number); }
     timerRef.current = null; activeRef.current = false; ringRef.current = [];
     processorRef.current?.disconnect(); sourceRef.current?.disconnect();
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -217,14 +219,14 @@ export function useVoiceConversation({ onTranscript }: Options) {
   // ---- Browser-native SpeechRecognition path (preferred when available) ----
   const stopRecognition = useCallback((abort: boolean) => {
     const recognition = recognitionRef.current;
-    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); window.clearTimeout(timerRef.current as unknown as number); timerRef.current = null; }
     if (!recognition) return;
     if (abort) { recognitionRef.current = null; recognition.onresult = null; recognition.onerror = null; recognition.onend = null; try { recognition.abort(); } catch { /* already stopped */ } }
     else { try { recognition.stop(); } catch { /* already stopped */ } }
   }, []);
 
   const finalizeRecognitionTurn = useCallback(() => {
-    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); window.clearTimeout(timerRef.current as unknown as number); timerRef.current = null; }
     recognitionRef.current = null;
     if (submittedRef.current) return; // guards against duplicate patient messages
     submittedRef.current = true;
@@ -240,44 +242,95 @@ export function useVoiceConversation({ onTranscript }: Options) {
     const recognition = new Ctor();
     recognition.continuous = true; recognition.interimResults = true; recognition.lang = "en-US"; recognition.maxAlternatives = 1;
     recognitionRef.current = recognition;
-    finalTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false;
+    finalTextRef.current = ""; submittedRef.current = false; speechDetectedRef.current = false; networkErrorCountRef.current = 0;
     startedAtRef.current = performance.now(); lastSpeechAtRef.current = startedAtRef.current;
     setVoiceState("LISTENING"); setTranscript(""); setError(null); window.speechSynthesis?.cancel();
 
     recognition.onresult = (event) => {
       if (generationRef.current !== generation) return;
       let interim = "";
+      let finalChunk = "";
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i]; if (!result) continue;
         const text = result[0]?.transcript ?? "";
-        if (result.isFinal) finalTextRef.current = `${finalTextRef.current} ${text}`.trim();
+        if (result.isFinal) finalChunk += `${finalChunk ? " " : ""}${text}`.trim();
         else interim += text;
       }
+      if (finalChunk) {
+        finalTextRef.current = `${finalTextRef.current} ${finalChunk}`.trim();
+      }
+      const combined = `${finalTextRef.current} ${interim}`.trim();
       if (finalTextRef.current || interim.trim()) { speechDetectedRef.current = true; lastSpeechAtRef.current = performance.now(); }
       if (stateRef.current === "LISTENING" && speechDetectedRef.current) setVoiceState("RECORDING");
-      setTranscript(`${finalTextRef.current} ${interim}`.trim());
+      setTranscript(combined);
     };
     recognition.onerror = (event) => {
       if (generationRef.current !== generation) return;
       const code = event.error ?? "";
       if (code === "no-speech" || code === "aborted") return; // onend handles the turn
+      
+      // Network errors: retry with backoff instead of failing immediately
+      if (code === "network") {
+        networkErrorCountRef.current += 1;
+        if (networkErrorCountRef.current <= 3) {
+          const backoffMs = Math.min(1000 * Math.pow(2, networkErrorCountRef.current - 1), 5000);
+          stopRecognition(true);
+          if (timerRef.current !== null) window.clearTimeout(timerRef.current as unknown as number);
+          timerRef.current = window.setTimeout(() => {
+            if (generationRef.current === generation && canUseBrowserStt()) {
+              try {
+                startBrowserListening();
+              } catch {
+                // If retry fails, fall through to error state
+                submittedRef.current = true;
+                setError("Speech recognition unavailable after multiple retries. Please try again or use text.");
+                setVoiceState("ERROR");
+              }
+            }
+          }, backoffMs) as unknown as number;
+          return;
+        }
+        // After 3 retries, give up
+        submittedRef.current = true;
+        stopRecognition(true);
+        setError("Speech recognition lost its network connection. Please try again or use text.");
+        setVoiceState("ERROR");
+        return;
+      }
+      
       submittedRef.current = true;
       stopRecognition(true);
       setError(code === "not-allowed" || code === "service-not-allowed"
         ? "Microphone access was blocked. Allow the microphone (or open the app in its own browser tab) — meanwhile you can type below."
-        : code === "network"
-          ? "Speech recognition lost its network connection. Please try again or type your message."
-          : "Speech recognition failed. Please try again or type your message.");
+        : "Speech recognition failed. Please try again or type your message.");
       setVoiceState("ERROR");
     };
-    recognition.onend = () => { if (generationRef.current !== generation) return; finalizeRecognitionTurn(); };
+    recognition.onend = () => {
+      if (generationRef.current !== generation) return;
+      if (submittedRef.current) return;
+      
+      // If we intentionally stopped (silence timer or manual stop), finalize without restarting
+      if (intentionalStopRef.current) {
+        intentionalStopRef.current = false;
+        finalizeRecognitionTurn();
+        return;
+      }
+      
+      // Unexpected stop - try to restart
+      try {
+        recognition.start();
+      } catch {
+        // If restart fails, finalize cleanly
+        finalizeRecognitionTurn();
+      }
+    };
 
     try { recognition.start(); } catch { recognitionRef.current = null; return false; }
 
     timerRef.current = window.setInterval(() => {
       const now = performance.now(); const elapsed = now - startedAtRef.current;
-      if (!speechDetectedRef.current) { if (elapsed >= VOICE_CAPTURE_CONFIG.silenceBeforeSpeechMs) stopRecognition(false); return; }
-      if (elapsed >= VOICE_CAPTURE_CONFIG.startupGraceMs && now - lastSpeechAtRef.current >= VOICE_CAPTURE_CONFIG.silenceAfterSpeechMs) stopRecognition(false);
+      if (!speechDetectedRef.current) { if (elapsed >= VOICE_CAPTURE_CONFIG.silenceBeforeSpeechMs) { intentionalStopRef.current = true; stopRecognition(false); } return; }
+      if (elapsed >= VOICE_CAPTURE_CONFIG.startupGraceMs && now - lastSpeechAtRef.current >= VOICE_CAPTURE_CONFIG.silenceAfterSpeechMs) { intentionalStopRef.current = true; stopRecognition(false); }
     }, 100);
     return true;
   }, [finalizeRecognitionTurn, setVoiceState, stopRecognition]);
@@ -315,11 +368,13 @@ export function useVoiceConversation({ onTranscript }: Options) {
 
 
   const stopListening = useCallback(() => {
-    if (recognitionRef.current) { stopRecognition(false); return; }
+    if (recognitionRef.current) { if (timerRef.current !== null) window.clearTimeout(timerRef.current as unknown as number); intentionalStopRef.current = true; stopRecognition(false); return; }
     void finishCapture();
   }, [finishCapture, stopRecognition]);
   const cancelListening = useCallback(() => {
     generationRef.current += 1; submittedRef.current = true; finalTextRef.current = "";
+    if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    intentionalStopRef.current = true;
     stopRecognition(true);
     pcmRef.current = []; speechDetectedRef.current = false; endTurn(); setVoiceState("IDLE");
   }, [endTurn, setVoiceState, stopRecognition]);
@@ -329,7 +384,7 @@ export function useVoiceConversation({ onTranscript }: Options) {
     if (mutedRef.current || !("speechSynthesis" in window) || !text.trim()) { finish(); return; }
     try { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.lang = "en-US"; utterance.rate = 1; utterance.pitch = 1; utterance.onend = finish; utterance.onerror = finish; setVoiceState("SPEAKING"); window.speechSynthesis.speak(utterance); } catch { finish(); }
   }, [setVoiceState, startListening]);
-  const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; submittedRef.current = true; stopRecognition(true); pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState, stopRecognition]);
+  const endSession = useCallback(() => { autoRef.current = false; setAutoMode(false); generationRef.current += 1; submittedRef.current = true; intentionalStopRef.current = true; stopRecognition(true); pcmRef.current = []; void releaseCapture(); window.speechSynthesis?.cancel(); setVoiceState("ENDED"); }, [releaseCapture, setVoiceState, stopRecognition]);
   const reset = useCallback(() => { setError(null); setTranscript(""); setVoiceState("IDLE"); }, [setVoiceState]);
 
   // Warm the microphone ahead of the first turn when permission was already granted,

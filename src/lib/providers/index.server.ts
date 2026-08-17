@@ -1,13 +1,13 @@
 /**
  * Provider registry / configuration.
  *
- * AI_PROVIDER  = lovable | openai-compatible | demo   (default: lovable, else demo)
- * STT_PROVIDER = lovable | openai-compatible | none   (default: lovable)
+ * AI_PROVIDER  = lovable | openai-compatible | demo
+ * STT_PROVIDER = lovable | openai-compatible | none
  *
- * To move off Lovable later: set AI_PROVIDER=openai-compatible with
- * AI_BASE_URL / AI_MODEL / AI_API_KEY pointing at a local server, and
- * STT_PROVIDER=openai-compatible with STT_BASE_URL / STT_MODEL. No other file
- * in the application changes.
+ * Lovable remains available as an optional provider, but it is not the default.
+ * When AI_BASE_URL + AI_MODEL are configured, the app prefers the OpenAI-
+ * compatible path so it can use Gemini or another compatible backend without
+ * requiring Lovable credits.
  */
 
 import { DemoAIProvider } from "./demo.server";
@@ -29,12 +29,16 @@ export function getAIProvider(): AIProvider {
 
   if (requested === "demo" || mode === "demo") return new DemoAIProvider();
 
-  if (requested === "openai-compatible" || requested === "local") {
-    const baseUrl = process.env["AI_BASE_URL"] ?? process.env["AI_DOCTOR_BASE_URL"];
-    const model = process.env["AI_MODEL"] ?? process.env["AI_DOCTOR_MODEL"];
+  if (requested === "lovable") return createLovableAIProvider() ?? new DemoAIProvider();
+
+  const baseUrl = process.env["AI_BASE_URL"] ?? process.env["AI_DOCTOR_BASE_URL"];
+  const model = process.env["AI_MODEL"] ?? process.env["AI_DOCTOR_MODEL"];
+  const openAiConfigured = Boolean(baseUrl && model);
+
+  if (requested === "openai-compatible" || requested === "local" || (requested === "" && openAiConfigured)) {
     if (baseUrl && model) {
       return new OpenAICompatibleAIProvider({
-        id: requested,
+        id: requested === "" ? "openai-compatible" : requested,
         apiKey: process.env["AI_API_KEY"] ?? process.env["AI_DOCTOR_API_KEY"] ?? "",
         baseUrl,
         model,
@@ -44,7 +48,7 @@ export function getAIProvider(): AIProvider {
     return new DemoAIProvider();
   }
 
-  return createLovableAIProvider() ?? new DemoAIProvider();
+  return new DemoAIProvider();
 }
 
 export function getSTTProvider(): STTProvider | null {
