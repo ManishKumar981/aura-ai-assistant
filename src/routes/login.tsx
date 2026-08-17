@@ -86,13 +86,28 @@ function LoginPage() {
               <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@clinic.com" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link to="/forgot-password" className="text-xs font-medium text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
               <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
             </div>
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}
             </Button>
           </form>
+
+          {needsConfirm && (
+            <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <p className="text-muted-foreground">This account still needs email confirmation.</p>
+              <Button type="button" variant="outline" size="sm" className="mt-2" disabled={busy} onClick={resendConfirmation}>
+                Resend confirmation email
+              </Button>
+            </div>
+          )}
+
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             No account?{" "}
