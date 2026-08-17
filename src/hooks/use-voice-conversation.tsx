@@ -123,6 +123,10 @@ export function useVoiceConversation({ onTranscript }: Options) {
   const submittedRef = useRef(false);
   const intentionalStopRef = useRef(false);
   const networkErrorCountRef = useRef(0);
+  // Kept separate from timerRef (a setInterval id) so clearing one never leaks the other.
+  const retryTimerRef = useRef<number | null>(null);
+  const restartCountRef = useRef(0);
+
   const [sttMode, setSttMode] = useState<"browser" | "provider" | "none">("none");
   onTranscriptRef.current = onTranscript; mutedRef.current = muted; autoRef.current = autoMode;
 
