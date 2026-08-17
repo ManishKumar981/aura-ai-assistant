@@ -50,6 +50,22 @@ function canUseBrowserStt() {
   return Boolean(speechRecognitionConstructor());
 }
 
+/**
+ * Recognition accuracy drops sharply when the locale does not match the speaker
+ * (e.g. an Indian-English speaker recognised as en-US). Prefer the browser locale,
+ * fall back to en-US, and allow an explicit override via localStorage.
+ */
+export function speechLanguage(): string {
+  if (typeof window === "undefined") return "en-US";
+  try {
+    const override = window.localStorage.getItem("aura.voice.lang");
+    if (override) return override;
+  } catch { /* storage blocked */ }
+  const locale = navigator.language || "en-US";
+  return /^[a-z]{2}-[A-Z]{2}$/.test(locale) ? locale : "en-US";
+}
+
+
 
 function encodeWav(chunks: Float32Array[], inputRate: number): Blob {
   const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
